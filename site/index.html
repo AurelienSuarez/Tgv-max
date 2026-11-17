@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Max Relais</title>
+<meta name="description" content="Trouve une place MAX JEUNE ou MAX SENIOR, même quand il faut découper le trajet en plusieurs billets.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!--app-->
+<div class="wrap">
+  <header class="brand">
+    <div class="brand-row">
+      <h1>Max<span>Relais</span></h1>
+      <p class="freshness" id="freshness">Chargement des places…</p>
+    </div>
+    <p class="pitch">Les places MAX JEUNE et MAX SENIOR disponibles sur 30 jours. Quand le trajet direct est complet, Max Relais cherche une combinaison de billets qui passe : changement de train, changement de gare, ou deux billets sur le même train.</p>
+  </header>
+
+  <form class="search" id="search" autocomplete="off">
+    <div class="places">
+      <div class="field combo">
+        <label for="from">Départ</label>
+        <input id="from" type="text" role="combobox" aria-expanded="false" aria-controls="from-list" aria-autocomplete="list" placeholder="Ville ou gare" spellcheck="false">
+        <ul id="from-list" class="options" role="listbox" hidden></ul>
+      </div>
+      <button type="button" class="swap" id="swap" aria-label="Inverser départ et arrivée" title="Inverser">⇅</button>
+      <div class="field combo">
+        <label for="to">Arrivée</label>
+        <input id="to" type="text" role="combobox" aria-expanded="false" aria-controls="to-list" aria-autocomplete="list" placeholder="Ville ou gare" spellcheck="false">
+        <ul id="to-list" class="options" role="listbox" hidden></ul>
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label" id="dates-label">Date de départ</span>
+      <div class="dates" id="dates" role="listbox" aria-labelledby="dates-label"></div>
+    </div>
+
+    <details class="prefs">
+      <summary>Réglages du découpage</summary>
+      <div class="prefs-grid">
+        <div class="field">
+          <label for="maxLegs">Billets au maximum</label>
+          <select id="maxLegs">
+            <option value="1">1 (direct uniquement)</option>
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="minChange">Correspondance minimum</label>
+          <select id="minChange">
+            <option value="5">5 min</option>
+            <option value="10" selected>10 min</option>
+            <option value="15">15 min</option>
+            <option value="20">20 min</option>
+            <option value="30">30 min</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="maxWait">Attente au maximum</label>
+          <select id="maxWait">
+            <option value="60">1 h</option>
+            <option value="120">2 h</option>
+            <option value="180" selected>3 h</option>
+            <option value="360">6 h</option>
+            <option value="720">12 h (nuit sur place)</option>
+          </select>
+        </div>
+      </div>
+      <p class="hint">Changer de gare dans une même ville (Paris Nord → Paris Gare de Lyon, par exemple) compte un temps de trajet en plus : de 15 à 60 min selon les gares.</p>
+    </details>
+  </form>
+
+  <nav class="tabs" role="tablist" aria-label="Vues">
+    <button type="button" role="tab" id="tab-trajets" aria-selected="true" data-tab="trajets">Trajets du jour</button>
+    <button type="button" role="tab" id="tab-calendrier" aria-selected="false" data-tab="calendrier">Calendrier</button>
+    <button type="button" role="tab" id="tab-depart" aria-selected="false" data-tab="depart">Où aller ?</button>
+  </nav>
+
+  <main id="view" aria-live="polite"></main>
+
+  <footer class="foot">
+    <p>Chaque segment est <strong>un billet à réserver séparément</strong> sur SNCF Connect. Les places partent vite et les données sont mises à jour une fois par jour : vérifie la disponibilité au moment de réserver.</p>
+    <p><a href="https://www.sncf-connect.com/" target="_blank" rel="noopener">Réserver sur SNCF Connect</a><span class="sep">·</span><span id="share-slot"></span></p>
+    <p class="legal">Données © SNCF Voyageurs, licence <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">ODbL</a>, dataset <a href="https://ressources.data.sncf.com/explore/dataset/tgvmax/" target="_blank" rel="noopener">tgvmax</a>. Max Relais n'est pas affilié à la SNCF. Les autocars sont exclus.</p>
+  </footer>
+</div>
+<!--/app-->
+<script type="module" src="app.js"></script>
+</body>
+</html>

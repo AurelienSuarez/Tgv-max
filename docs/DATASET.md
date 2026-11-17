@@ -62,7 +62,7 @@ GET .../datasets/tgvmax/exports/csv?delimiter=%3B
 3. **Le regroupement par ville est déjà dans les libellés** : plusieurs codes IATA partagent un même nom `(intramuros)`.
    - `PARIS (intramuros)` : FRPLY (Lyon), FRPMO (Montparnasse), FRPNO (Nord), FRPST (Est), FRPAZ (Austerlitz), FRPBE (Bercy)
    - `LYON (intramuros)` : FRLPD (Part-Dieu), FRLPE (Perrache)
-   - `LILLE (intramuros)` : FRLLE (Flandres), FRADJ (Europe)
+   - `LILLE (intramuros)` : FRLLE (Lille Europe : TGV vers CDG, Lyon, Bruxelles), FRADJ (Lille Flandres : trains vers Paris Nord)
    - Gares de la même ville qui ne sont pas regroupées et gardent leur propre libellé : MARSEILLE ST CHARLES / BLANCARDE, MONTPELLIER SAINT ROCH / SUD DE FRANCE, LYON ST EXUPERY TGV., PARIS MONTPARNASSE VAUGIRARD.
    - Conséquence : il faut **toujours utiliser `*_iata` comme clé**, jamais le libellé. Il faut aussi une table écrite à la main `iata → vrai nom de gare` pour l'affichage, puisque le dataset affiche « PARIS (intramuros) » pour les 6 gares. Un changement de gare dans une même ville (par ex. Paris Nord → Paris Lyon) demande un **temps de correspondance minimum spécifique**, bien plus long qu'un changement de quai dans la même gare.
 4. **Doublons contradictoires** : 566 clés `(date, train_no, o, d, dep)` apparaissent deux fois, une fois `OUI` et une fois `NON`. Ce sont des trains de nuit (`IC NUIT`), sans doute une ligne par classe (siège/couchette). Règle d'ingestion : **fusionner en OUI dès qu'une des lignes est OUI**, avec si besoin un drapeau `multi`.
