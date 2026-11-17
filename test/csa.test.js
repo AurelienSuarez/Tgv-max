@@ -131,3 +131,66 @@ test('maximum wait in a connection: no night spent in the station by default', (
   assert.equal(run([day, next], { origins: [A], dests: [C] }).length, 0);
   assert.equal(run([day, next], { origins: [A], dests: [C], maxWait: 12 * 60 }).length, 1);
 });
+
+test('max wait: a blocked first path does not hide a later departure', () => {
+  // 07:00 departure reaches B at 08:00 but the 12:00 connection is 4 h later (> 3 h).
+  // 10:00 departure reaches B at 11:00: that one works.
+  const day = [c('1', A, B, '07:00', '08:00'), c('2', A, B, '10:00', '11:00'), c('3', B, C, '12:00', '13:00')];
+  const r = run([day], { origins: [A], dests: [C], maxWait: 180 });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].legs[0].train, '2');
+});
+
+test('max wait: an earlier arrival does not hide a later one that fits', () => {
+  // Same origin time window: train 1 arrives at B too early; train 2 leaves A later.
+  const day = [c('1', A, B, '06:00', '07:00'), c('2', A, B, '06:30', '10:30'), c('3', B, C, '12:00', '13:00')];
+  const r = run([day], { origins: [A], dests: [C], maxWait: 180 });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].legs[0].train, '2');
+});
+
+test('reachAll matches profile for every destination', async () => {
+  const { reachAll } = await import('../site/lib/csa.js');
+  const day = [
+    c('1', A, B, '07:00', '08:00'), c('2', B, C, '08:20', '09:00'), c('3', A, C, '08:00', '10:00'),
+    c('4', A, PN, '09:00', '10:00'), c('5', PL, M, '11:00', '13:00'), c('6', B, M, '08:30', '12:30'),
+  ];
+  const tt = makeTimetable([day]);
+  const tr = makeTransfers(ST);
+  const reach = reachAll(tt, tr, { origins: [A], maxLegs: 3 });
+  for (const dest of [B, C, PN, PL, M]) {
+    const p = profile(tt, tr, { origins: [A], dests: [dest], maxLegs: 3 });
+    const r = reach.get(dest) || [];
+    assert.deepEqual(r.map((o) => [o.dep, o.arr]), p.map((j) => [j.dep, j.arr]), `destination ${dest}`);
+  }
+});
+
+test('reverse search: "towards C" finds the same trips as "from A to C"', async () => {
+  const { reachAll, reverseTimetable } = await import('../site/lib/csa.js');
+  const day = [c('1', A, B, '07:00', '08:00'), c('2', B, C, '08:20', '09:00'), c('3', A, C, '08:00', '10:00'), c('4', XB(), C, '09:00', '09:30')];
+  function XB() { return PN; }
+  const tt = makeTimetable([day]);
+  const tr = makeTransfers(ST);
+  const back = reachAll(reverseTimetable(tt), tr, { origins: [C], maxLegs: 3, from: -2 * DAYM, to: 0 });
+  const fromA = (back.get(A) || []).map((o) => [-o.arr, -o.dep]).sort((x, y) => x[0] - y[0]);
+  const p = profile(tt, tr, { origins: [A], dests: [C], maxLegs: 3 });
+  assert.deepEqual(fromA, p.map((j) => [j.dep, j.arr]));
+  assert.ok(back.get(PN));
+});
+const DAYM = 1440;
+
+test('new seats since the previous version', async () => {
+  const { seatKeys, markNew } = await import('../scripts/lib/ingest.js');
+  const H = 'date;train_no;entity;axe;origine_iata;destination_iata;origine;destination;heure_depart;heure_arrivee;od_happy_card\n';
+  const yesterday = buildDataset(parseCsv(H
+    + '2026-11-20;1;X;SUD EST;FRAAA;FRBBB;AAA;BBB;08:00;09:00;OUI\n'
+    + '2026-11-20;2;X;SUD EST;FRAAA;FRBBB;AAA;BBB;10:00;11:00;NON'));
+  const today = buildDataset(parseCsv(H
+    + '2026-11-20;1;X;SUD EST;FRAAA;FRBBB;AAA;BBB;08:00;09:00;OUI\n'
+    + '2026-11-20;2;X;SUD EST;FRAAA;FRBBB;AAA;BBB;10:00;11:00;OUI\n' // freed up
+    + '2026-11-21;3;X;SUD EST;FRAAA;FRBBB;AAA;BBB;10:00;11:00;OUI')); // newly opened day
+  assert.equal(markNew(today, seatKeys(yesterday)), 1);
+  assert.equal(today.days['2026-11-20'].find((r) => r[0] === '2')[6], 1);
+  assert.equal(today.days['2026-11-20'].find((r) => r[0] === '1')[6], undefined);
+  assert.equal(today.days['2026-11-21'][0][6], undefined);
+});

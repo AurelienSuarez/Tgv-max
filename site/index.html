@@ -41,6 +41,17 @@
       <div class="dates" id="dates" role="listbox" aria-labelledby="dates-label"></div>
     </div>
 
+    <label class="switch" for="rt">
+      <input type="checkbox" id="rt">
+      <span class="track" aria-hidden="true"></span>
+      <span>Aller-retour</span>
+    </label>
+
+    <div class="field" id="ret-field" hidden>
+      <span class="label" id="ret-label">Date du retour</span>
+      <div class="dates" id="ret-dates" role="listbox" aria-labelledby="ret-label"></div>
+    </div>
+
     <details class="prefs">
       <summary>Réglages du découpage</summary>
       <div class="prefs-grid">
@@ -73,7 +84,7 @@
           </select>
         </div>
       </div>
-      <p class="hint">Changer de gare dans une même ville (Paris Nord → Paris Gare de Lyon, par exemple) compte un temps de trajet en plus : de 15 à 60 min selon les gares.</p>
+      <p class="hint">Changer de gare dans une même ville (Paris Nord → Paris Gare de Lyon, par exemple) demande du temps en plus : de 15 à 60 min selon les gares. Ce sont des estimations, prends de la marge.</p>
     </details>
   </form>
 

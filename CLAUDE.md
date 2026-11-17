@@ -5,17 +5,20 @@ Site statique qui cherche des places MAX JEUNE / MAX SENIOR (dataset SNCF `tgvma
 ## Choix structurants
 - **Zéro backend** : un cron GitHub Actions télécharge le dataset, le découpe en un JSON par jour (`site/data/days/YYYY-MM-DD.json`) et déploie `site/` sur GitHub Pages.
 - **Routage côté client** : Connection Scan Algorithm par rounds (`site/lib/csa.js`) dans un Web Worker (`site/worker.js`). Une ligne du dataset = un couple O-D avec son propre quota = un billet.
-- **Hors périmètre** : comptes, Premium, alertes de places libérées (tout ce qui demande un serveur). **Autocars exclus** (décision produit).
+- **Hors périmètre** : comptes (pas d'API SNCF Connect), Premium, notifications en temps réel (le dataset n'est mis à jour qu'une fois par jour). **Autocars exclus** (décision produit).
+- **Nouvelles places depuis hier** : `build-data.js --state .state` garde les places de la version précédente du dataset (cache GitHub Actions) et marque les nouvelles (index 6 = 1 dans les fichiers jour). Une date qui vient d'ouvrir n'est jamais marquée.
 - **Licences** : code MIT, données dérivées ODbL avec attribution SNCF Voyageurs.
 
 ## Règles de données (vérifiées sur le dataset réel)
 - Toujours identifier une gare par `*_iata`, jamais par le libellé (« PARIS (intramuros) » couvre 6 gares). Noms réels et groupes de villes dans `site/lib/stations.js`.
 - `heure_arrivee < heure_depart` ⇒ +24 h. Une ligne est datée du jour réel de son départ.
 - Doublons OUI/NON (trains de nuit) : OUI l'emporte.
+- Chaque gare garde **toutes** ses arrivées (pas seulement la plus tôt) : avec une attente maximale, une arrivée trop précoce ne doit pas en masquer une plus tardive.
+- `reachAll` (Explorer avec correspondance) = profil vers toutes les gares ; le sens « vers une gare » utilise `reverseTimetable` (temps inversé).
 - La recherche d'un jour J charge J et J+1. Un train est identifié par son numéro dans cette fenêtre ; « même train » seulement si l'arrêt dure ≤ 60 min.
 
 ## Tests imposés (`npm test`)
-Passage de minuit, changement de gare dans une même ville, billets découpés sur le même train, temps de correspondance, limite de billets, attente maximale, profil Pareto, échantillon réel (`docs/sample/`). Tout changement de `csa.js` ou `ingest.js` doit garder ces tests verts et en ajouter pour les nouveaux cas.
+Passage de minuit, changement de gare dans une même ville, billets découpés sur le même train, temps de correspondance, limite de billets, attente maximale (2 cas de régression), profil Pareto, `reachAll` cohérent avec `profile`, recherche inversée, nouvelles places, échantillon réel (`docs/sample/`). Tout changement de `csa.js` ou `ingest.js` doit garder ces tests verts et en ajouter pour les nouveaux cas.
 
 ## Commandes
 `npm test` · `npm run build:data` · `npm run serve` · `node scripts/build-single.js` (page autonome avec instantané des données) · `node scripts/build-geo.js <trainline stations.csv> <ne_50m countries.geojson> site/data/stations.json` (coordonnées et fond de carte, à relancer seulement si de nouvelles gares apparaissent).

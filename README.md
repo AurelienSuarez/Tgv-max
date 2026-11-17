@@ -2,9 +2,10 @@
 
 Trouve une place **MAX JEUNE / MAX SENIOR** sur les 30 prochains jours, même quand le trajet direct est complet : Max Relais combine plusieurs billets disponibles (changement de train, changement de gare dans une même ville, ou deux billets sur le même train).
 
-- **Trajets du jour** : tous les trajets intéressants d'une journée (aucun n'est à la fois plus tôt au départ, plus tard à l'arrivée et avec plus de billets qu'un autre).
+- **Trajets du jour** : tous les trajets intéressants d'une journée, en aller simple ou en aller-retour.
+- **Nouvelles places** : les places apparues depuis la veille sont signalées, avec un filtre pour ne voir qu'elles.
 - **Calendrier** : le nombre de trajets possibles pour chacun des 30 prochains jours.
-- **Explorer** : sur une carte interactive, toutes les gares reliées en direct avec des places, au départ d'une gare ou à l'arrivée à une gare.
+- **Explorer** : sur une carte interactive, toutes les gares reliées avec des places (en direct ou avec une correspondance), au départ d'une gare ou à l'arrivée à une gare.
 
 ## Fonctionnement
 

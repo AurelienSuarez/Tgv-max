@@ -1,5 +1,6 @@
 import { fmtTime, fmtDuration, DAY } from './lib/csa.js';
 import { createMap } from './map.js';
+import { interStationMinutes } from './lib/stations.js';
 
 const EMB = window.__MAXRELAIS__ || null;
 const $ = (s, el = document) => el.querySelector(s);
@@ -11,9 +12,13 @@ const store = {
 };
 
 const PAGE = 15;
-const state = { from: null, to: null, date: null, tab: 'trajets', shown: PAGE, exploreFilter: '', exploreDir: 'from', trip: 0 };
+const state = {
+  from: null, to: null, date: null, retDate: null, rt: false, tab: 'trajets',
+  shown: { a: PAGE, r: PAGE }, onlyNew: false, calPick: 'a',
+  exploreFilter: '', exploreDir: 'from', exploreLegs: 1, trip: 'a0',
+};
 let meta, stations, axes, places, dates, worker, map;
-let lastTrips = [];
+let lastTrips = { a: [], r: [] };
 let reqId = 0;
 const pending = new Map();
 
@@ -113,37 +118,61 @@ function combobox(input, list, onPick) {
   });
 }
 
-function query() {
+function query(reverse = false) {
   return {
-    origins: state.from.ids,
-    dests: state.to.ids,
+    origins: (reverse ? state.to : state.from).ids,
+    dests: (reverse ? state.from : state.to).ids,
     maxLegs: Number($('#maxLegs').value),
     minChange: Number($('#minChange').value),
     maxWait: Number($('#maxWait').value),
   };
 }
 
-function renderDates() {
-  $('#dates').innerHTML = dates
+const DAY_LONG = { weekday: 'long', day: 'numeric', month: 'long' };
+const plural = (n, one, many = `${one}s`) => `${n} ${n > 1 ? many : one}`;
+
+function dateChips(list, selected) {
+  return list
     .map((d) => {
       const o = dateObj(d);
-      return `<button type="button" class="date-chip" role="option" data-date="${d}" aria-selected="${d === state.date}">
+      return `<button type="button" class="date-chip" role="option" data-date="${d}" aria-selected="${d === selected}">
         <span class="dow">${esc(o.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', ''))}</span>
         <span class="num">${o.getDate()}</span>
         <span class="mon">${esc(o.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', ''))}</span></button>`;
     })
     .join('');
-  const sel = $('#dates [aria-selected="true"]');
-  if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'center' });
+}
+
+function renderDates() {
+  $('#dates').innerHTML = dateChips(dates, state.date);
+  $('#ret-field').hidden = !state.rt;
+  $('#rt').checked = state.rt;
+  if (state.rt) $('#ret-dates').innerHTML = dateChips(dates.filter((d) => d >= state.date), state.retDate);
+  for (const box of ['#dates', '#ret-dates']) {
+    const sel = $(`${box} [aria-selected="true"]`);
+    if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+}
+
+function addDays(d, n) {
+  const o = dateObj(d);
+  o.setDate(o.getDate() + n);
+  return o.toLocaleDateString('en-CA');
 }
 
 function setDate(d) {
   state.date = d;
-  state.trip = 0;
-  state.shown = PAGE;
-  document.querySelectorAll('.date-chip').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.date === d)));
-  const sel = $('#dates [aria-selected="true"]');
-  if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (!state.retDate || state.retDate < d) state.retDate = dates.includes(addDays(d, 2)) ? addDays(d, 2) : dates[dates.length - 1];
+  state.trip = 'a0';
+  state.shown = { a: PAGE, r: PAGE };
+  renderDates();
+}
+
+function setRetDate(d) {
+  state.retDate = d;
+  state.trip = 'a0';
+  state.shown.r = PAGE;
+  renderDates();
 }
 
 function setTab(t) {
@@ -155,13 +184,14 @@ function stationName(i) {
   return stations[i].name;
 }
 
-function journeyCard(j, idx) {
+function journeyCard(j, key) {
   const n = j.legs.length;
   const nextDay = Math.floor(j.arr / DAY);
   const chips = [];
+  if (j.isNew) chips.push('<span class="chip new">Nouveau</span>');
   if (n === 1) chips.push('<span class="chip direct">Direct</span>');
   else chips.push(`<span class="chip">${n} billets</span>`);
-  if (j.legs.some((l) => l.sameTrain)) chips.push('<span class="chip split">Billets découpés, même train</span>');
+  if (j.legs.some((l) => l.sameTrain)) chips.push('<span class="chip split">2 billets dans le même train</span>');
   if (j.legs.some((l) => l.stationChange)) chips.push('<span class="chip">Changement de gare</span>');
   if (j.legs.some((l) => l.axe != null && axes[l.axe] === 'IC NUIT')) chips.push('<span class="chip">Train de nuit</span>');
 
@@ -169,17 +199,22 @@ function journeyCard(j, idx) {
   j.legs.forEach((l, k) => {
     if (k > 0) {
       const prev = j.legs[k - 1];
-      if (l.sameTrain) parts.push(`<li class="transfer same">Reste dans le train ${esc(l.train)} à ${esc(stationName(l.from))} : nouveau billet à partir d'ici (arrêt de ${l.wait} min)</li>`);
-      else if (l.stationChange) parts.push(`<li class="transfer city">Changement de gare : ${esc(stationName(prev.to))} → ${esc(stationName(l.from))}, ${fmtDuration(l.wait)} entre les deux trains</li>`);
-      else parts.push(`<li class="transfer">Correspondance de ${fmtDuration(l.wait)} à ${esc(stationName(l.from))}</li>`);
+      if (l.sameTrain) {
+        parts.push(`<li class="transfer same">Tu restes dans le train ${esc(l.train)} à ${esc(stationName(l.from))} : le billet suivant commence ici (arrêt de ${l.wait} min).</li>`);
+      } else if (l.stationChange) {
+        const need = interStationMinutes(stations[prev.to].id, stations[l.from].id);
+        parts.push(`<li class="transfer city">Changement de gare : ${esc(stationName(prev.to))} → ${esc(stationName(l.from))}. Tu as ${fmtDuration(l.wait)}${need ? ` ; compte environ ${fmtDuration(need)} pour aller d'une gare à l'autre (estimation)` : ''}.</li>`);
+      } else {
+        parts.push(`<li class="transfer">Correspondance de ${fmtDuration(l.wait)} à ${esc(stationName(l.from))}</li>`);
+      }
     }
     parts.push(`<li class="ticket">
-      <div class="tk-time"><span>${fmtTime(l.dep).replace(' (+1)', '')}</span><span>${fmtTime(l.arr).replace(' (+1)', '')}</span></div>
-      <div class="tk-body"><span class="tk-route">${esc(stationName(l.from))} → ${esc(stationName(l.to))}</span><span class="tk-train">${n > 1 ? `<span class="tk-num">Billet ${k + 1}/${n}</span>` : ''}${esc(trainLabel(l.axe, l.train))} · ${fmtDuration(l.arr - l.dep)}${l.dep >= DAY ? ' · lendemain' : ''}</span></div>
+      <div class="tk-time"><span>${fmtTime(l.dep).replace(/ \(\+\d\)/, '')}</span><span>${fmtTime(l.arr).replace(/ \(\+\d\)/, '')}</span></div>
+      <div class="tk-body"><span class="tk-route">${esc(stationName(l.from))} → ${esc(stationName(l.to))}</span><span class="tk-train">${n > 1 ? `<span class="tk-num">Billet ${k + 1}/${n}</span>` : ''}${esc(trainLabel(l.axe, l.train))} · ${fmtDuration(l.arr - l.dep)}${l.dep >= DAY ? ' · lendemain' : ''}${l.isNew ? ' · <b class="new-txt">place apparue depuis hier</b>' : ''}</span></div>
     </li>`);
   });
 
-  return `<article class="trip${idx === state.trip ? ' selected' : ''}" data-j="${idx}" tabindex="0" aria-label="Trajet de ${fmtTime(j.dep)}, voir sur la carte">
+  return `<article class="trip${key === state.trip ? ' selected' : ''}" data-j="${key}" tabindex="0" aria-label="Trajet de ${fmtTime(j.dep)}, voir sur la carte">
     <header class="trip-head">
       <div class="times"><span>${fmtTime(j.dep)}</span><span class="arrow">→</span><span>${fmtTime(j.arr % DAY)}${nextDay ? `<sup>+${nextDay}</sup>` : ''}</span></div>
       <div class="trip-meta">${fmtDuration(j.arr - j.dep)}</div>
@@ -205,9 +240,13 @@ function placeOf(i) {
   return places.find((p) => p.key === stations[i].id);
 }
 
+function tripByKey(key) {
+  return lastTrips[key[0]] && lastTrips[key[0]][Number(key.slice(1))];
+}
+
 function drawTripMap() {
-  const j = lastTrips[state.trip];
-  if (!j) { map.draw({ items: [], legs: [], focus: [...state.from.ids, ...state.to.ids].slice(0, 2) }); return; }
+  const j = tripByKey(state.trip) || lastTrips.a[0] || lastTrips.r[0];
+  if (!j) { map.draw({ items: [], legs: [], focus: [...state.from.ids.slice(0, 1), ...state.to.ids.slice(0, 1)] }); return; }
   const legs = [];
   const items = [];
   j.legs.forEach((l, k) => {
@@ -218,35 +257,59 @@ function drawTripMap() {
   map.draw({ items, legs, focus: [j.legs[0].from, j.legs[j.legs.length - 1].to] });
 }
 
+async function searchSide(side) {
+  const reverse = side === 'r';
+  const date = reverse ? state.retDate : state.date;
+  const q = query(reverse);
+  if (date === todayParis()) q.from = nowMinutesParis();
+  return call('search', { date, query: q });
+}
+
+function sectionHtml(side, js) {
+  const reverse = side === 'r';
+  const a = reverse ? state.to : state.from;
+  const b = reverse ? state.from : state.to;
+  const date = reverse ? state.retDate : state.date;
+  const day = fmtDate(date, DAY_LONG);
+  const title = state.rt ? `<h2 class="leg-title"><span>${reverse ? 'Retour' : 'Aller'}</span> ${esc(day)}</h2>` : '';
+  const shownList = state.onlyNew ? js.filter((j) => j.isNew) : js;
+  if (!js.length) {
+    return `${title}<div class="empty"><strong>Aucune place gratuite ${esc(a.label)} → ${esc(b.label)} le ${esc(day)}.</strong>
+      Essaie d'autoriser plus de billets ou une attente plus longue dans les réglages, ou regarde le calendrier.
+      <div><button type="button" class="btn" data-goto="calendrier">Voir le calendrier</button></div></div>`;
+  }
+  const direct = js.filter((j) => j.legs.length === 1).length;
+  const fresh = js.filter((j) => j.isNew).length;
+  const summary = `<p class="summary"><strong>${plural(js.length, 'trajet')}</strong> ${esc(a.label)} → ${esc(b.label)}${state.rt ? '' : ` le ${esc(day)}`} · ${direct} direct${direct > 1 ? 's' : ''}, ${js.length - direct} en plusieurs billets${fresh ? ` · <b class="new-txt">${plural(fresh, 'nouveau', 'nouveaux')}</b>` : ''}</p>`;
+  const limit = state.shown[side];
+  const cards = shownList.slice(0, limit).map((j) => journeyCard(j, `${side}${js.indexOf(j)}`)).join('');
+  const more = shownList.length > limit ? `<button type="button" class="btn ghost more" data-more="${side}">Afficher ${Math.min(PAGE, shownList.length - limit)} trajets de plus</button>` : '';
+  const none = state.onlyNew && !shownList.length ? '<div class="empty">Pas de nouvelle place depuis hier sur ce trajet.</div>' : '';
+  return `<section class="leg-block">${title}${summary}${cards}${none}${more}</section>`;
+}
+
 async function showTrips() {
   if (needPlaces('trajets')) return;
   const view = $('#view');
   view.innerHTML = '<p class="loading">Recherche des places…</p>';
-  const q = query();
-  if (state.date === todayParis()) q.from = nowMinutesParis();
   const token = ++showTrips.token;
-  let js;
+  let a;
+  let r = [];
   try {
-    js = await call('search', { date: state.date, query: q });
+    [a, r] = await Promise.all([searchSide('a'), state.rt ? searchSide('r') : Promise.resolve([])]);
   } catch (e) {
     view.innerHTML = `<div class="empty"><strong>Les données de ce jour n'ont pas pu être chargées.</strong>${esc(e.message)}. Recharge la page pour réessayer.</div>`;
     return;
   }
   if (token !== showTrips.token) return;
-  const day = fmtDate(state.date, { weekday: 'long', day: 'numeric', month: 'long' });
-  lastTrips = js;
-  if (state.trip >= js.length) state.trip = 0;
+  lastTrips = { a, r };
+  if (!tripByKey(state.trip)) state.trip = a.length ? 'a0' : 'r0';
   drawTripMap();
-  if (!js.length) {
-    view.innerHTML = `<div class="empty"><strong>Aucune place MAX ${esc(state.from.label)} → ${esc(state.to.label)} le ${esc(day)}.</strong>
-      Essaie d'autoriser plus de billets ou une attente plus longue dans les réglages, ou regarde les autres jours.
-      <div><button type="button" class="btn" data-goto="calendrier">Voir le calendrier</button></div></div>`;
-    return;
-  }
-  const direct = js.filter((j) => j.legs.length === 1).length;
-  const summary = `<p class="summary"><strong>${js.length} trajet${js.length > 1 ? 's' : ''}</strong> ${esc(state.from.label)} → ${esc(state.to.label)} le ${esc(day)} · ${direct} direct${direct > 1 ? 's' : ''}, ${js.length - direct} en plusieurs billets</p>`;
-  const more = js.length > state.shown ? `<button type="button" class="btn ghost more" id="more">Afficher ${Math.min(PAGE, js.length - state.shown)} trajets de plus</button>` : '';
-  view.innerHTML = summary + js.slice(0, state.shown).map(journeyCard).join('') + more;
+  const anyNew = [...a, ...r].some((j) => j.isNew);
+  const toggle = anyNew || state.onlyNew
+    ? `<div class="toolbar"><button type="button" class="toggle" data-onlynew aria-pressed="${state.onlyNew}">Seulement les places apparues depuis hier</button></div>`
+    : '';
+  view.innerHTML = toggle + sectionHtml('a', a) + (state.rt ? sectionHtml('r', r) : '');
 }
 showTrips.token = 0;
 
@@ -255,15 +318,28 @@ async function showCalendar() {
   const view = $('#view');
   view.innerHTML = '<p class="loading">Calcul des 30 prochains jours…</p>';
   const token = ++showTrips.token;
-  const res = await call('calendar', { dates, query: query() });
+  const [resA, resR] = await Promise.all([
+    call('calendar', { dates, query: query() }),
+    state.rt ? call('calendar', { dates, query: query(true) }) : Promise.resolve(null),
+  ]);
   if (token !== showTrips.token) return;
-  const max = Math.max(1, ...res.map((r) => r.count));
-  const total = res.filter((r) => r.count).length;
-  let html = `<p class="summary"><strong>${total} jour${total > 1 ? 's' : ''} sur ${res.length}</strong> avec au moins un trajet ${esc(state.from.label)} → ${esc(state.to.label)}. Touche un jour pour voir les trajets.</p>`;
+  const pickR = state.rt && state.calPick === 'r';
+  const main = pickR ? resR : resA;
+  const max = Math.max(1, ...main.map((r) => r.count));
+  const total = main.filter((r) => r.count).length;
+  const a = pickR ? state.to : state.from;
+  const b = pickR ? state.from : state.to;
+  let html = '';
+  if (state.rt) {
+    html += `<div class="seg" role="radiogroup" aria-label="Jour à choisir">
+      <button type="button" role="radio" data-calpick="a" aria-checked="${!pickR}">Choisir le jour de l'aller</button>
+      <button type="button" role="radio" data-calpick="r" aria-checked="${pickR}">Choisir le jour du retour</button></div>`;
+  }
+  html += `<p class="summary"><strong>${total} jour${total > 1 ? 's' : ''} sur ${main.length}</strong> avec au moins un trajet gratuit ${esc(a.label)} → ${esc(b.label)}. Touche un jour pour voir les trajets.</p>`;
   let month = '';
   let grid = '';
   const flush = () => { if (grid) html += `<div class="cal">${['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'].map((d) => `<span class="dow">${d}</span>`).join('')}${grid}</div>`; grid = ''; };
-  for (const r of res) {
+  main.forEach((r, i) => {
     const o = dateObj(r.date);
     const m = o.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
     if (m !== month) {
@@ -272,45 +348,63 @@ async function showCalendar() {
       html += `<h2 class="cal-month">${esc(m)}</h2>`;
       grid += '<span></span>'.repeat((o.getDay() + 6) % 7);
     }
+    const other = state.rt ? (pickR ? resA[i] : resR[i]) : null;
     const heat = r.count ? 0.25 + 0.75 * (r.count / max) : 0;
-    const label = r.count ? `${r.count} trajet${r.count > 1 ? 's' : ''}${r.direct ? `, ${r.direct} direct${r.direct > 1 ? 's' : ''}` : ''}` : 'aucun';
-    grid += `<button type="button" class="cal-cell${r.count ? '' : ' none'}${heat > 0.6 ? ' hot' : ''}" style="--heat:${heat.toFixed(2)}" data-date="${r.date}" ${r.date === state.date ? 'aria-current="date"' : ''} aria-label="${esc(fmtDate(r.date, { weekday: 'long', day: 'numeric', month: 'long' }))} : ${label}">
-      <span class="d">${o.getDate()}</span><span class="n">${r.count ? `${r.count}${r.direct ? ` · ${r.direct}D` : ''}` : '–'}</span></button>`;
-  }
+    const selected = pickR ? state.retDate : state.date;
+    const label = `${r.count ? plural(r.count, 'trajet') : 'aucun trajet'}${r.fresh ? `, dont ${plural(r.fresh, 'nouveau', 'nouveaux')}` : ''}${other ? `, ${plural(other.count, 'trajet')} dans l'autre sens` : ''}`;
+    const disabled = pickR && r.date < state.date;
+    grid += `<button type="button" class="cal-cell${r.count ? '' : ' none'}${heat > 0.6 ? ' hot' : ''}" style="--heat:${heat.toFixed(2)}" data-date="${r.date}" ${disabled ? 'disabled' : ''} ${r.date === selected ? 'aria-current="date"' : ''} aria-label="${esc(fmtDate(r.date, DAY_LONG))} : ${label}">
+      <span class="d">${o.getDate()}${r.fresh ? '<i class="fresh" aria-hidden="true"></i>' : ''}</span>
+      <span class="n">${r.count ? `${r.count}${r.direct ? ` · ${r.direct}D` : ''}` : '–'}${other ? `<br><span class="other">${pickR ? 'A' : 'R'} ${other.count}</span>` : ''}</span></button>`;
+  });
   flush();
-  html += '<p class="legend">Le chiffre compte les trajets possibles ce jour-là ; « D » compte ceux qui sont directs. Plus la case est foncée, plus il y a de choix.</p>';
+  html += `<p class="legend">Le chiffre compte les trajets gratuits possibles ce jour-là ; « D » compte les directs.${state.rt ? ` « ${pickR ? 'A' : 'R'} » compte les trajets dans l'autre sens.` : ''} Un point signale des places apparues depuis hier. Plus la case est foncée, plus il y a de choix.</p>`;
   view.innerHTML = html;
 }
 
 async function showExplore() {
   const dir = state.exploreDir;
+  const legs = state.exploreLegs;
   const seg = `<div class="seg" role="radiogroup" aria-label="Sens">
       <button type="button" role="radio" data-dir="from" aria-checked="${dir === 'from'}">Au départ de ${esc(state.from ? state.from.label : '…')}</button>
       <button type="button" role="radio" data-dir="to" aria-checked="${dir === 'to'}">À l'arrivée à ${esc(state.to ? state.to.label : '…')}</button>
+    </div>
+    <div class="seg small" role="radiogroup" aria-label="Correspondances">
+      <button type="button" role="radio" data-legs="1" aria-checked="${legs === 1}">Trains directs</button>
+      <button type="button" role="radio" data-legs="2" aria-checked="${legs === 2}">Avec une correspondance</button>
     </div>`;
   if (needPlaces('depart')) { $('#view').insertAdjacentHTML('afterbegin', seg); return; }
   const place = dir === 'from' ? state.from : state.to;
   const view = $('#view');
-  view.innerHTML = seg + '<p class="loading">Recherche des trains directs…</p>';
+  view.innerHTML = seg + `<p class="loading">${legs === 1 ? 'Recherche des trains directs…' : 'Recherche des trajets avec correspondance…'}</p>`;
   const token = ++showTrips.token;
-  const res = await call('explore', { date: state.date, places: place.ids, dir });
+  const q = { ...query(), maxLegs: legs };
+  if (state.date === todayParis()) q.from = nowMinutesParis();
+  const res = await call('explore', { date: state.date, places: place.ids, dir, query: q });
   if (token !== showTrips.token) return;
-  const day = fmtDate(state.date, { weekday: 'long', day: 'numeric', month: 'long' });
-  const info = (r) => `${r.count} train${r.count > 1 ? 's' : ''} · ${r.first === r.last ? `à ${fmtTime(r.first)}` : `de ${fmtTime(r.first)} à ${fmtTime(r.last)}`} · dès ${fmtDuration(r.shortest)}`;
+  const day = fmtDate(state.date, DAY_LONG);
+  const unit = legs === 1 ? 'train' : 'trajet';
+  const info = (r) => [
+    `${plural(r.count, unit)}`,
+    r.first === r.last ? `à ${fmtTime(r.first)}` : `de ${fmtTime(r.first)} à ${fmtTime(r.last)}`,
+    `dès ${fmtDuration(r.shortest)}`,
+    legs > 1 ? (r.direct ? 'direct possible' : 'avec correspondance') : '',
+  ].filter(Boolean).join(' · ') + (r.fresh ? ` · <b class="new-txt">${plural(r.fresh, 'nouveau', 'nouveaux')}</b>` : '');
   map.draw({
     focus: place.ids,
     focusLabel: place.city ? place.label : null,
     items: res.map((r) => ({ station: r.station, weight: r.count, info: info(r), trips: true })),
     legs: res.map((r) => (dir === 'from' ? [r.via, r.station, 'from'] : [r.station, r.via, 'to'])),
   });
+  const how = legs === 1 ? 'en direct' : 'en 2 billets au plus';
   if (!res.length) {
-    view.innerHTML = seg + `<div class="empty"><strong>Aucun train direct avec des places MAX ${dir === 'from' ? 'au départ de' : "à l'arrivée à"} ${esc(place.label)} le ${esc(day)}.</strong>Essaie un autre jour.</div>`;
+    view.innerHTML = seg + `<div class="empty"><strong>Aucune place gratuite ${how} ${dir === 'from' ? 'au départ de' : "pour aller à"} ${esc(place.label)} le ${esc(day)}.</strong>Essaie un autre jour${legs === 1 ? ' ou « Avec une correspondance »' : ''}.</div>`;
     return;
   }
   res.sort((a, b) => b.count - a.count || stationName(a.station).localeCompare(stationName(b.station), 'fr'));
   const f = norm(state.exploreFilter);
   const what = dir === 'from' ? 'destinations' : 'gares de départ';
-  view.innerHTML = seg + `<p class="summary"><strong>${res.length} ${what}</strong> avec des places MAX en direct ${dir === 'from' ? 'au départ de' : "pour aller à"} ${esc(place.label)} le ${esc(day)}. Touche une gare sur la carte ou dans la liste.</p>
+  view.innerHTML = seg + `<p class="summary"><strong>${res.length} ${what}</strong> avec des places gratuites ${how} ${dir === 'from' ? 'au départ de' : 'pour aller à'} ${esc(place.label)} le ${esc(day)}. Touche une gare sur la carte ou dans la liste.</p>
     <div class="filter"><input id="explore-filter" type="search" placeholder="Filtrer les gares" value="${esc(state.exploreFilter)}" aria-label="Filtrer les gares"></div>
     <ul class="dest-list">${res.map((r) => `<li${f && !norm(stationName(r.station)).includes(f) ? ' hidden' : ''}><span class="name">${esc(stationName(r.station))}</span>
       <span class="info">${info(r)}</span>
@@ -325,16 +419,19 @@ function mapAction(act, i) {
   else if (act === 'trips') {
     if (state.tab === 'depart' && state.exploreDir === 'to') { state.from = p; $('#from').value = p.label; }
     else { state.to = p; $('#to').value = p.label; }
+    if (state.tab === 'depart') {
+      $('#maxLegs').value = String(Math.max(Number($('#maxLegs').value), state.exploreLegs));
+    }
     setTab('trajets');
   }
-  state.trip = 0;
-  state.shown = PAGE;
+  state.trip = 'a0';
+  state.shown = { a: PAGE, r: PAGE };
   refresh();
 }
 
-function selectTrip(i) {
-  state.trip = i;
-  document.querySelectorAll('.trip[data-j]').forEach((c) => c.classList.toggle('selected', Number(c.dataset.j) === i));
+function selectTrip(key) {
+  state.trip = key;
+  document.querySelectorAll('.trip[data-j]').forEach((c) => c.classList.toggle('selected', c.dataset.j === key));
   drawTripMap();
   const m = $('#map');
   if (m.getBoundingClientRect().bottom < 60) m.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -349,7 +446,11 @@ function refresh() {
 }
 
 function persist() {
-  const s = { from: state.from?.key, to: state.to?.key, date: state.date, maxLegs: $('#maxLegs').value, minChange: $('#minChange').value, maxWait: $('#maxWait').value, tab: state.tab, dir: state.exploreDir };
+  const s = {
+    from: state.from?.key, to: state.to?.key, date: state.date, retDate: state.retDate, rt: state.rt,
+    maxLegs: $('#maxLegs').value, minChange: $('#minChange').value, maxWait: $('#maxWait').value,
+    tab: state.tab, dir: state.exploreDir, legs: state.exploreLegs,
+  };
   store.set('last', s);
   if (!EMB) {
     try {
@@ -357,6 +458,7 @@ function persist() {
       if (s.from) p.set('de', s.from);
       if (s.to) p.set('a', s.to);
       if (s.date) p.set('le', s.date);
+      if (s.rt && s.retDate) p.set('retour', s.retDate);
       if (s.tab !== 'trajets') p.set('vue', s.tab);
       history.replaceState(null, '', `${location.pathname}?${p}`);
     } catch { /* no history API */ }
@@ -367,15 +469,18 @@ function restore() {
   const saved = store.get('last') || {};
   let params = new URLSearchParams();
   try { params = new URLSearchParams(location.search); } catch { /* ignore */ }
-  const from = params.get('de') || saved.from || 'city:Paris';
-  const to = params.get('a') || saved.to || 'city:Marseille';
-  state.from = findPlace(from);
-  state.to = findPlace(to);
+  const shared = params.has('de') || params.has('a');
+  state.from = findPlace(params.get('de') || saved.from || 'city:Paris');
+  state.to = findPlace(params.get('a') || saved.to || 'city:Marseille');
   const d = params.get('le') || saved.date;
-  state.date = dates.includes(d) ? d : dates[0];
+  setDate(dates.includes(d) ? d : dates[0]);
+  const ret = params.get('retour') || (shared ? null : saved.rt && saved.retDate);
+  state.rt = !!ret;
+  if (ret && dates.includes(ret) && ret >= state.date) state.retDate = ret;
   const tab = params.get('vue') || saved.tab;
   if (['trajets', 'calendrier', 'depart'].includes(tab)) state.tab = tab;
   if (saved.dir === 'to') state.exploreDir = 'to';
+  if (saved.legs === 2) state.exploreLegs = 2;
   for (const k of ['maxLegs', 'minChange', 'maxWait']) {
     if (saved[k] && [...$(`#${k}`).options].some((o) => o.value === saved[k])) $(`#${k}`).value = saved[k];
   }
@@ -390,6 +495,23 @@ async function loadJSON(path) {
   const r = await fetch(path, { cache: 'no-cache' });
   if (!r.ok) throw new Error(`${path} : HTTP ${r.status}`);
   return r.json();
+}
+
+function renderFreshness() {
+  const updated = meta.sourceModified || meta.generatedAt;
+  const when = new Date(updated).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const ageHours = (Date.now() - new Date(meta.generatedAt).getTime()) / 36e5;
+  const el = $('#freshness');
+  let text = `Places SNCF du ${when}`;
+  if (meta.newSince && meta.newSeats) text += ` · ${meta.newSeats} nouvelles depuis hier`;
+  if (EMB) text += ' (instantané)';
+  el.textContent = text;
+  if (ageHours > 36) {
+    el.classList.add('stale');
+    el.textContent += EMB
+      ? ". Cette copie n'est plus à jour : des places ont pu partir ou se libérer."
+      : ". Les données n'ont pas été mises à jour depuis plus d'un jour : vérifie sur SNCF Connect.";
+  }
 }
 
 async function main() {
@@ -416,10 +538,7 @@ async function main() {
   };
   await call('init', { stations, dates: meta.dates, base: EMB ? '' : new URL('data/', location.href).href, days: EMB ? EMB.days : null });
 
-  const updated = meta.sourceModified || meta.generatedAt;
-  const when = new Date(updated).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-  $('#freshness').textContent = `Places SNCF du ${when}${EMB ? ' (instantané)' : ''}`;
-
+  renderFreshness();
   map = createMap($('#map'), { stations, onAction: mapAction });
   restore();
   $('#from').value = state.from?.label || '';
@@ -427,18 +546,30 @@ async function main() {
   renderDates();
   setTab(state.tab);
 
-  combobox($('#from'), $('#from-list'), (p) => { state.from = p; state.shown = PAGE; state.trip = 0; refresh(); });
-  combobox($('#to'), $('#to-list'), (p) => { state.to = p; state.shown = PAGE; state.trip = 0; refresh(); });
+  const resetAndRefresh = () => { state.shown = { a: PAGE, r: PAGE }; state.trip = 'a0'; refresh(); };
+  combobox($('#from'), $('#from-list'), (p) => { state.from = p; resetAndRefresh(); });
+  combobox($('#to'), $('#to-list'), (p) => { state.to = p; resetAndRefresh(); });
   $('#swap').addEventListener('click', () => {
     [state.from, state.to] = [state.to, state.from];
     $('#from').value = state.from?.label || '';
     $('#to').value = state.to?.label || '';
-    refresh();
+    resetAndRefresh();
   });
   $('#search').addEventListener('submit', (e) => { e.preventDefault(); refresh(); });
   $('#dates').addEventListener('click', (e) => {
     const b = e.target.closest('.date-chip');
     if (b) { setDate(b.dataset.date); if (state.tab === 'calendrier') setTab('trajets'); refresh(); }
+  });
+  $('#ret-dates').addEventListener('click', (e) => {
+    const b = e.target.closest('.date-chip');
+    if (b) { setRetDate(b.dataset.date); if (state.tab === 'calendrier') setTab('trajets'); refresh(); }
+  });
+  $('#rt').addEventListener('change', (e) => {
+    state.rt = e.target.checked;
+    if (state.rt && !state.retDate) setDate(state.date);
+    state.calPick = 'a';
+    renderDates();
+    resetAndRefresh();
   });
   for (const id of ['maxLegs', 'minChange', 'maxWait']) $(`#${id}`).addEventListener('change', refresh);
   document.querySelector('.tabs').addEventListener('click', (e) => {
@@ -447,21 +578,34 @@ async function main() {
   });
   $('#view').addEventListener('click', (e) => {
     const t = e.target;
-    if (t.id === 'more') { state.shown += PAGE; showTrips(); return; }
+    const more = t.closest('[data-more]');
+    if (more) { state.shown[more.dataset.more] += PAGE; showTrips(); return; }
+    if (t.closest('[data-onlynew]')) { state.onlyNew = !state.onlyNew; showTrips(); return; }
     const go = t.closest('[data-goto]');
     if (go) { setTab(go.dataset.goto); refresh(); return; }
+    const calPick = t.closest('[data-calpick]');
+    if (calPick) { state.calPick = calPick.dataset.calpick; showCalendar(); return; }
     const cell = t.closest('.cal-cell');
-    if (cell) { setDate(cell.dataset.date); setTab('trajets'); refresh(); window.scrollTo({ top: $('.tabs').offsetTop - 8 }); return; }
+    if (cell) {
+      if (state.rt && state.calPick === 'r') setRetDate(cell.dataset.date);
+      else setDate(cell.dataset.date);
+      setTab('trajets');
+      refresh();
+      window.scrollTo({ top: $('.tabs').offsetTop - 8 });
+      return;
+    }
     const pick = t.closest('[data-pick]');
     if (pick) { mapAction('trips', Number(pick.dataset.pick)); window.scrollTo({ top: $('.tabs').offsetTop - 8 }); return; }
     const dirBtn = t.closest('[data-dir]');
     if (dirBtn) { state.exploreDir = dirBtn.dataset.dir; state.exploreFilter = ''; refresh(); return; }
+    const legsBtn = t.closest('[data-legs]');
+    if (legsBtn) { state.exploreLegs = Number(legsBtn.dataset.legs); refresh(); return; }
     const card = t.closest('.trip[data-j]');
-    if (card) selectTrip(Number(card.dataset.j));
+    if (card) selectTrip(card.dataset.j);
   });
   $('#view').addEventListener('keydown', (e) => {
     const card = e.target.closest && e.target.closest('.trip[data-j]');
-    if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectTrip(Number(card.dataset.j)); }
+    if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectTrip(card.dataset.j); }
   });
   $('#view').addEventListener('input', (e) => {
     if (e.target.id !== 'explore-filter') return;

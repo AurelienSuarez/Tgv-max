@@ -22,8 +22,19 @@ const SAME_TRAIN_MAX_STOP = 60;
 export function makeTimetable(days) {
   const rows = [];
   days.forEach((list, i) => {
-    for (const c of list || []) rows.push([c[0], c[1], c[2], c[3] + i * DAY, c[4] + i * DAY, c[5]]);
+    for (const c of list || []) rows.push([c[0], c[1], c[2], c[3] + i * DAY, c[4] + i * DAY, c[5] ?? 0, c[6] ?? 0]);
   });
+  return fromRows(rows);
+}
+
+/** The same timetable read backwards in time (to search "towards" a station). */
+export function reverseTimetable(tt) {
+  const rows = [];
+  for (let i = 0; i < tt.n; i++) rows.push([tt.train[i], tt.d[i], tt.o[i], -tt.arr[i], -tt.dep[i], tt.axe[i], tt.isNew[i]]);
+  return fromRows(rows);
+}
+
+function fromRows(rows) {
   rows.sort((a, b) => a[3] - b[3] || a[4] - b[4]);
   const n = rows.length;
   const tt = {
@@ -34,6 +45,7 @@ export function makeTimetable(days) {
     d: new Int32Array(n),
     trip: new Int32Array(n),
     axe: new Int16Array(n),
+    isNew: new Uint8Array(n),
     train: new Array(n),
   };
   const tripIds = new Map();
@@ -43,7 +55,8 @@ export function makeTimetable(days) {
     tt.d[i] = c[2];
     tt.dep[i] = c[3];
     tt.arr[i] = c[4];
-    tt.axe[i] = c[5] ?? 0;
+    tt.axe[i] = c[5];
+    tt.isNew[i] = c[6] ? 1 : 0;
     if (!tripIds.has(c[0])) tripIds.set(c[0], tripIds.size);
     tt.trip[i] = tripIds.get(c[0]);
   });
@@ -83,59 +96,83 @@ function lowerBound(arr, x) {
   return lo;
 }
 
-/** Earliest arrival for 1..maxLegs tickets, leaving from `origins` no earlier than `start`. */
-export function scan(tt, transfers, { origins, dests, start, maxLegs = 3, maxDuration = 24 * 60, maxWait = 180, lastStart = DAY - 1 }) {
+// Latest label with t <= x in a list sorted by t (or null).
+function latestAtMost(list, x) {
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (list[mid].t <= x) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo ? list[lo - 1] : null;
+}
+
+function insertSorted(list, lab) {
+  let i = list.length;
+  while (i > 0 && list[i - 1].t > lab.t) i--;
+  if (i > 0 && list[i - 1].t === lab.t) return; // same arrival time: keep the first one
+  list.splice(i, 0, lab);
+}
+
+/**
+ * Earliest arrival for 1..maxLegs tickets, leaving from `origins` no earlier than `start`.
+ * Each station keeps every arrival (sorted), not only the earliest: with a maximum
+ * wait, an arrival that is too early must not hide a later one that fits.
+ * Returns best[k] (label at the destination) and, if `all` is set, the labels of
+ * every station after the last round.
+ */
+export function scan(tt, transfers, { origins, dests, start, maxLegs = 3, maxDuration = 24 * 60, maxWait = 180, lastStart = DAY - 1, all = false }) {
   const nS = transfers.length;
-  const destList = [...dests];
+  const originSet = origins instanceof Set ? origins : new Set(origins);
+  const destList = dests ? [...dests] : [];
+  const originLabel = { t: start, c: -1, prev: null, origin: true };
   let prev = new Array(nS).fill(null);
-  for (const s of origins) prev[s] = { t: start, c: -1, prev: null, origin: true };
   let prevTrip = new Map();
   const horizon = start + maxDuration;
   const i0 = lowerBound(tt.dep, start);
   const best = [];
 
   for (let k = 1; k <= maxLegs; k++) {
-    const cur = prev.slice();
+    const cur = prev.map((l) => (l ? l.slice() : null));
     const curTrip = new Map(prevTrip);
     for (let i = i0; i < tt.n; i++) {
       const t = tt.dep[i];
       if (t > horizon) break;
       const s = tt.o[i];
       let from = null;
-      const tl = prevTrip.get(tt.trip[i] * nS + s);
-      if (tl && tl.t <= t && t - tl.t <= SAME_TRAIN_MAX_STOP) from = tl;
-      else {
-        for (const [q, m] of transfers[s]) {
-          const L = prev[q];
-          if (!L) continue;
-          if (L.origin) {
-            if (q === s) {
+      if (originSet.has(s)) {
+        if (t <= lastStart) from = originLabel;
+      } else {
+        const tl = prevTrip.get(tt.trip[i] * nS + s);
+        if (tl && tl.t <= t && t - tl.t <= SAME_TRAIN_MAX_STOP) from = tl;
+        else {
+          for (const [q, m] of transfers[s]) {
+            if (!prev[q]) continue;
+            const L = latestAtMost(prev[q], t - m);
+            if (L && t - L.t <= maxWait) {
               from = L;
               break;
             }
-            continue;
-          }
-          if (L.t + m <= t && t - L.t <= maxWait) {
-            from = L;
-            break;
           }
         }
       }
       if (!from) continue;
-      if (from.origin && t > lastStart) continue;
       const e = tt.d[i];
+      if (originSet.has(e)) continue; // never come back to the start
       const lab = { t: tt.arr[i], c: i, prev: from };
-      if (!cur[e] || lab.t < cur[e].t) cur[e] = lab;
+      insertSorted(cur[e] || (cur[e] = []), lab);
       const key = tt.trip[i] * nS + e;
       const old = curTrip.get(key);
       if (!old || lab.t < old.t) curTrip.set(key, lab);
     }
     let b = null;
-    for (const x of destList) if (cur[x] && !cur[x].origin && (!b || cur[x].t < b.t)) b = cur[x];
+    for (const x of destList) if (cur[x] && cur[x].length && (!b || cur[x][0].t < b.t)) b = cur[x][0];
     best[k] = b;
     prev = cur;
     prevTrip = curTrip;
   }
+  if (all) best.labels = prev;
   return best;
 }
 
@@ -144,7 +181,7 @@ function reconstruct(tt, transfers, label) {
   for (let L = label; L && !L.origin; L = L.prev) conns.push(L.c);
   conns.reverse();
   const legs = conns.map((i, n) => {
-    const leg = { train: tt.train[i], from: tt.o[i], to: tt.d[i], dep: tt.dep[i], arr: tt.arr[i], axe: tt.axe[i] };
+    const leg = { train: tt.train[i], from: tt.o[i], to: tt.d[i], dep: tt.dep[i], arr: tt.arr[i], axe: tt.axe[i], isNew: tt.isNew[i] === 1 };
     if (n > 0) {
       const p = conns[n - 1];
       leg.wait = tt.dep[i] - tt.arr[p];
@@ -153,7 +190,7 @@ function reconstruct(tt, transfers, label) {
     }
     return leg;
   });
-  return { dep: legs[0].dep, arr: legs[legs.length - 1].arr, legs };
+  return { dep: legs[0].dep, arr: legs[legs.length - 1].arr, legs, isNew: legs.some((l) => l.isNew) };
 }
 
 function dominates(a, b) {
@@ -196,6 +233,46 @@ export function profile(tt, transfers, { origins, dests, maxLegs = 3, from = 0, 
   return all
     .filter((a) => !all.some((b) => b !== a && dominates(b, a)))
     .sort((a, b) => a.dep - b.dep || a.arr - b.arr || a.legs.length - b.legs.length);
+}
+
+/**
+ * Every station reachable from `origins` (departures between `from` and `to`),
+ * with its non-dominated options (later departure, earlier arrival).
+ * @returns {Map<station, Array<{dep, arr, legs, isNew}>>}
+ */
+export function reachAll(tt, transfers, { origins, maxLegs = 2, from = 0, to = DAY - 1, maxDuration = 24 * 60, maxWait = 180 }) {
+  const originSet = new Set(origins);
+  const deps = [];
+  for (let i = lowerBound(tt.dep, from); i < tt.n && tt.dep[i] <= to; i++) {
+    if (originSet.has(tt.o[i]) && deps[deps.length - 1] !== tt.dep[i]) deps.push(tt.dep[i]);
+  }
+  const options = new Map(); // station -> Map(dep -> {dep, arr, legs, isNew})
+  for (const start of deps) {
+    const { labels } = scan(tt, transfers, { origins: originSet, start, maxLegs, maxDuration, maxWait, lastStart: to, all: true });
+    labels.forEach((list, s) => {
+      if (!list || originSet.has(s)) return;
+      for (const L of list) {
+        let legs = 0;
+        let first = L;
+        let isNew = false;
+        for (let x = L; x && !x.origin; x = x.prev) { legs++; first = x; if (tt.isNew[x.c]) isNew = true; }
+        const dep = tt.dep[first.c];
+        if (dep !== start) continue; // found again from its own departure time
+        const m = options.get(s) || options.set(s, new Map()).get(s);
+        const old = m.get(dep);
+        if (!old || L.t < old.arr || (L.t === old.arr && legs < old.legs)) m.set(dep, { dep, arr: L.t, legs, isNew, via: tt.o[first.c] });
+      }
+    });
+  }
+  const out = new Map();
+  for (const [s, m] of options) {
+    const list = [...m.values()].sort((a, b) => b.dep - a.dep);
+    const kept = [];
+    let bestArr = Infinity;
+    for (const o of list) if (o.arr < bestArr) { kept.push(o); bestArr = o.arr; }
+    out.set(s, kept.reverse());
+  }
+  return out;
 }
 
 export function fmtTime(min) {

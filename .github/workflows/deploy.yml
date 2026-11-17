@@ -28,8 +28,14 @@ jobs:
           node-version: 22
       - name: Tests
         run: npm test
+      - name: Restore yesterday's seats
+        uses: actions/cache@v4
+        with:
+          path: .state
+          key: tgvmax-state-${{ github.run_id }}
+          restore-keys: tgvmax-state-
       - name: Download and split the tgvmax dataset
-        run: node scripts/build-data.js --out site/data
+        run: node scripts/build-data.js --out site/data --state .state
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

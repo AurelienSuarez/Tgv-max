@@ -66,3 +66,37 @@ export function buildDataset(rows) {
 
   return { stations, axes, days, dates: [...allDates].sort() };
 }
+
+// --- New seats since the previous dataset version ---
+
+/** Keys of available seats per date, independent of station indexes. */
+export function seatKeys(ds) {
+  const out = {};
+  for (const date of ds.dates) {
+    out[date] = (ds.days[date] || []).map(([train, o, d, dep]) => `${train}|${ds.stations[o].id}|${ds.stations[d].id}|${dep}`);
+  }
+  return out;
+}
+
+/**
+ * Flags (index 6 = 1) the seats absent from the previous version.
+ * Dates the previous version did not cover (the newly opened day) are not
+ * flagged: every seat would look new.
+ * @returns {number} number of new seats
+ */
+export function markNew(ds, previousKeys) {
+  let count = 0;
+  for (const date of ds.dates) {
+    const prev = previousKeys && previousKeys[date];
+    if (!prev) continue;
+    const set = new Set(prev);
+    for (const row of ds.days[date]) {
+      const key = `${row[0]}|${ds.stations[row[1]].id}|${ds.stations[row[2]].id}|${row[3]}`;
+      if (!set.has(key)) {
+        row[6] = 1;
+        count++;
+      }
+    }
+  }
+  return count;
+}

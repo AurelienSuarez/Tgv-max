@@ -1,13 +1,17 @@
 // Downloads the `tgvmax` dataset and writes site/data/ (one JSON file per day).
-// Usage: node scripts/build-data.js [--csv local-file.csv] [--out site/data]
+// Usage: node scripts/build-data.js [--csv local-file.csv] [--modified ISO-date] [--out site/data] [--state .state]
+//
+// --state keeps the seats of the latest and previous dataset versions between runs
+// (the GitHub Action stores it in its cache) to flag new seats since yesterday.
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { parseCsv, buildDataset } from './lib/ingest.js';
+import { parseCsv, buildDataset, seatKeys, markNew } from './lib/ingest.js';
 
 const API = 'https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets/tgvmax';
 const args = process.argv.slice(2);
 const opt = (name, def) => (args.includes(name) ? args[args.indexOf(name) + 1] : def);
 const out = opt('--out', 'site/data');
+const stateDir = opt('--state', '.state');
 
 async function fetchRetry(url, as = 'text', tries = 5) {
   for (let i = 1; ; i++) {
@@ -33,6 +37,21 @@ const [csv, metaSrc] = await Promise.all([
 const rows = parseCsv(csv);
 if (rows.length < 1000 && !local) throw new Error(`Suspicious export: ${rows.length} rows`);
 const ds = buildDataset(rows);
+const sourceModified = metaSrc?.metas?.default?.modified ?? opt('--modified', null);
+
+// Previous version of the dataset (only when SNCF published a new one since).
+const readState = async (name) => JSON.parse(await readFile(join(stateDir, name), 'utf8').catch(() => 'null'));
+let current = await readState('current.json');
+let previous = await readState('previous.json');
+const keys = seatKeys(ds);
+if (!current || current.sourceModified !== sourceModified || !sourceModified) {
+  if (current && sourceModified) previous = current;
+  current = { sourceModified, keys };
+}
+const newSeats = previous ? markNew(ds, previous.keys) : 0;
+await mkdir(stateDir, { recursive: true });
+await writeFile(join(stateDir, 'current.json'), JSON.stringify(current));
+if (previous) await writeFile(join(stateDir, 'previous.json'), JSON.stringify(previous));
 
 await rm(out, { recursive: true, force: true });
 await mkdir(join(out, 'days'), { recursive: true });
@@ -42,11 +61,13 @@ for (const date of ds.dates) {
 }
 const meta = {
   generatedAt: new Date().toISOString(),
-  sourceModified: metaSrc?.metas?.default?.modified ?? null,
+  sourceModified,
+  newSince: previous ? previous.sourceModified : null,
+  newSeats,
   rows: rows.length,
   seats: Object.values(ds.days).reduce((n, l) => n + l.length, 0),
   dates: ds.dates,
   attribution: 'Données © SNCF Voyageurs, licence ODbL. Source : ressources.data.sncf.com, dataset tgvmax.',
 };
 await writeFile(join(out, 'meta.json'), JSON.stringify(meta, null, 1));
-console.log(`${meta.rows} rows → ${meta.seats} OUI connections over ${meta.dates.length} days, ${ds.stations.length} stations. Source updated: ${meta.sourceModified}`);
+console.log(`${meta.rows} rows → ${meta.seats} OUI connections over ${meta.dates.length} days, ${ds.stations.length} stations. Source updated: ${meta.sourceModified}. New seats since ${meta.newSince}: ${newSeats}`);
