@@ -66,6 +66,7 @@ const meta = {
   newSeats,
   rows: rows.length,
   seats: Object.values(ds.days).reduce((n, l) => n + l.length, 0),
+  seatsByDate: Object.fromEntries(ds.dates.map((d) => [d, ds.days[d].length])),
   dates: ds.dates,
   attribution: 'Données © SNCF Voyageurs, licence ODbL. Source : ressources.data.sncf.com, dataset tgvmax.',
 };

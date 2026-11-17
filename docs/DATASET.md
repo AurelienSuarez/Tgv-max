@@ -70,6 +70,10 @@ GET .../datasets/tgvmax/exports/csv?delimiter=%3B
 6. On trouve 50 cas où un même train a des horaires différents à la même gare le même jour, probablement les doublons de trains de nuit ou des trains scindés. Le code doit les tolérer et ne pas supposer l'unicité.
 7. `train_no` ne suffit pas à identifier un trajet : l'identifiant doit être `date + train_no`. Pour un train de nuit, J+1 peut contenir un autre train portant le même numéro.
 
+## Le jour qui vient d'ouvrir (J+30)
+
+Observé le 2026-11-17 à 6h23 : le dernier jour de la fenêtre (2026-12-17) n'avait que **26 places OUI** pour 11 024 lignes, contre 2 348 la veille et 1 000 à 6 000 les autres jours. Les places MAX du jour qui vient d'ouvrir ne sont donc pas encore toutes en ligne au moment de la mise à jour. Une seule observation : à confirmer sur plusieurs jours (`meta.seatsByDate` l'enregistre à chaque exécution). Le site l'annonce prudemment (« sans doute »).
+
 ## Échantillon de test
 
 `docs/sample/tgvmax-sample.csv` (67 lignes, extrait sous ODbL, source SNCF) contient :

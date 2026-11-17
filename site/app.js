@@ -134,16 +134,38 @@ function query(reverse = false) {
 const DAY_LONG = { weekday: 'long', day: 'numeric', month: 'long' };
 const plural = (n, one, many = `${one}s`) => `${n} ${n > 1 ? many : one}`;
 
+// The last date of the window is the day SNCF just opened (D+30).
+const openedDate = () => meta.dates[meta.dates.length - 1];
+
 function dateChips(list, selected) {
   return list
     .map((d) => {
       const o = dateObj(d);
-      return `<button type="button" class="date-chip" role="option" data-date="${d}" aria-selected="${d === selected}">
+      const isOpened = d === openedDate();
+      return `<button type="button" class="date-chip${isOpened ? ' opened-chip' : ''}" role="option" data-date="${d}" aria-selected="${d === selected}"${isOpened ? ' title="Jour qui vient d\'ouvrir"' : ''}>
         <span class="dow">${esc(o.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', ''))}</span>
         <span class="num">${o.getDate()}</span>
-        <span class="mon">${esc(o.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', ''))}</span></button>`;
+        <span class="mon">${isOpened ? 'ouvert' : esc(o.toLocaleDateString('fr-FR', { month: 'short' }).replace('.', ''))}</span></button>`;
     })
     .join('');
+}
+
+function renderOpened() {
+  const d = openedDate();
+  const box = $('#opened');
+  if (!d || !meta.seatsByDate || !dates.includes(d)) return;
+  const counts = meta.dates.filter((x) => x !== d && dates.includes(x)).map((x) => meta.seatsByDate[x] || 0).sort((a, b) => a - b);
+  const median = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
+  const n = meta.seatsByDate[d] || 0;
+  const day = fmtDate(d, DAY_LONG);
+  const few = median && n < median * 0.2;
+  box.innerHTML = `<span class="opened-tag">Nouveau jour</span>
+    <span>Le <strong>${esc(day)}</strong> vient d'ouvrir à la réservation. ${few
+      ? `Pour l'instant, il n'a que ${n} place${n > 1 ? 's' : ''} gratuite${n > 1 ? 's' : ''} (environ ${median.toLocaleString('fr-FR')} les autres jours) : ses places arrivent sans doute plus tard. Reviens voir après la prochaine mise à jour.`
+      : `Il a déjà ${n.toLocaleString('fr-FR')} places gratuites : c'est le moment d'en profiter.`}</span>
+    <button type="button" class="linkish" id="opened-go">Voir ce jour</button>`;
+  box.hidden = false;
+  $('#opened-go').addEventListener('click', () => { setDate(d); if (state.tab !== 'trajets') setTab('trajets'); refresh(); });
 }
 
 function renderDates() {
@@ -386,12 +408,13 @@ async function showCalendar() {
     const selected = pickR ? state.retDate : state.date;
     const label = `${r.count ? plural(r.count, 'trajet') : 'aucun trajet'}${r.fresh ? `, dont ${plural(r.fresh, 'nouveau', 'nouveaux')}` : ''}${other ? `, ${plural(other.count, 'trajet')} dans l'autre sens` : ''}`;
     const disabled = pickR && r.date < state.date;
+    const opened = r.date === openedDate() ? '<span class="cal-opened">ouvert</span>' : '';
     grid += `<button type="button" class="cal-cell${r.count ? '' : ' none'}${heat > 0.6 ? ' hot' : ''}" style="--heat:${heat.toFixed(2)}" data-date="${r.date}" ${disabled ? 'disabled' : ''} ${r.date === selected ? 'aria-current="date"' : ''} aria-label="${esc(fmtDate(r.date, DAY_LONG))} : ${label}">
-      <span class="d">${o.getDate()}${r.fresh ? '<i class="fresh" aria-hidden="true"></i>' : ''}</span>
+      <span class="d">${o.getDate()}${r.fresh ? '<i class="fresh" aria-hidden="true"></i>' : ''}${opened}</span>
       <span class="n">${r.count ? `${r.count}${r.direct ? ` · ${r.direct}D` : ''}` : '–'}${other ? `<br><span class="other">${pickR ? 'A' : 'R'} ${other.count}</span>` : ''}</span></button>`;
   });
   flush();
-  html += `<p class="legend">Le chiffre compte les trajets gratuits possibles ce jour-là ; « D » compte les directs.${state.rt ? ` « ${pickR ? 'A' : 'R'} » compte les trajets dans l'autre sens.` : ''} Un point signale des places apparues depuis hier. Plus la case est foncée, plus il y a de choix.</p>`;
+  html += `<p class="legend">Le chiffre compte les trajets gratuits possibles ce jour-là ; « D » compte les directs.${state.rt ? ` « ${pickR ? 'A' : 'R'} » compte les trajets dans l'autre sens.` : ''} Un point signale des places apparues depuis hier ; « ouvert » marque le jour qui vient d'ouvrir à la réservation. Plus la case est foncée, plus il y a de choix.</p>`;
   view.innerHTML = html;
 }
 
@@ -668,6 +691,7 @@ async function main() {
   await call('init', { stations, dates: meta.dates, base: EMB ? '' : new URL('data/', location.href).href, days: EMB ? EMB.days : null });
 
   renderFreshness();
+  renderOpened();
   map = createMap($('#map'), { stations, onAction: mapAction });
   restore();
   $('#from').value = state.from?.label || '';
