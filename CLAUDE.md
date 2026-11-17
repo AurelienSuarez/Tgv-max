@@ -18,4 +18,6 @@ Site statique qui cherche des places MAX JEUNE / MAX SENIOR (dataset SNCF `tgvma
 Passage de minuit, changement de gare dans une même ville, billets découpés sur le même train, temps de correspondance, limite de billets, attente maximale, profil Pareto, échantillon réel (`docs/sample/`). Tout changement de `csa.js` ou `ingest.js` doit garder ces tests verts et en ajouter pour les nouveaux cas.
 
 ## Commandes
-`npm test` · `npm run build:data` · `npm run serve` · `node scripts/build-single.js` (page autonome avec instantané des données).
+`npm test` · `npm run build:data` · `npm run serve` · `node scripts/build-single.js` (page autonome avec instantané des données) · `node scripts/build-geo.js <trainline stations.csv> <ne_50m countries.geojson> site/data/stations.json` (coordonnées et fond de carte, à relancer seulement si de nouvelles gares apparaissent).
+
+

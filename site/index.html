@@ -18,7 +18,7 @@
       <h1>Max<span>Relais</span></h1>
       <p class="freshness" id="freshness">Chargement des places…</p>
     </div>
-    <p class="pitch">Les places MAX JEUNE et MAX SENIOR disponibles sur 30 jours. Quand le trajet direct est complet, Max Relais cherche une combinaison de billets qui passe : changement de train, changement de gare, ou deux billets sur le même train.</p>
+    <p class="pitch">Les places à 0 € MAX JEUNE et MAX SENIOR des 30 prochains jours. Quand le direct est complet, Max Relais trouve une combinaison de billets qui passe : changement de train, changement de gare, ou deux billets sur le même train.</p>
   </header>
 
   <form class="search" id="search" autocomplete="off">
@@ -80,8 +80,10 @@
   <nav class="tabs" role="tablist" aria-label="Vues">
     <button type="button" role="tab" id="tab-trajets" aria-selected="true" data-tab="trajets">Trajets du jour</button>
     <button type="button" role="tab" id="tab-calendrier" aria-selected="false" data-tab="calendrier">Calendrier</button>
-    <button type="button" role="tab" id="tab-depart" aria-selected="false" data-tab="depart">Où aller ?</button>
+    <button type="button" role="tab" id="tab-depart" aria-selected="false" data-tab="depart">Explorer</button>
   </nav>
+
+  <section id="map" aria-label="Carte interactive"></section>
 
   <main id="view" aria-live="polite"></main>
 

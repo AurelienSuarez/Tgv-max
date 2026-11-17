@@ -47,20 +47,24 @@ async function journeys(date, q) {
   });
 }
 
-async function explore(date, origins) {
+// Direct seats from a set of stations (dir 'from') or towards it (dir 'to').
+async function explore(date, places, dir = 'from') {
   const list = await getDay(date);
-  const set = new Set(origins);
-  const byDest = new Map();
-  for (const [train, o, d, dep, arr] of list) {
-    if (!set.has(o) || set.has(d)) continue;
-    const e = byDest.get(d) || { dest: d, count: 0, first: DAY * 2, last: -1, shortest: Infinity };
+  const set = new Set(places);
+  const byOther = new Map();
+  for (const [, o, d, dep, arr] of list) {
+    const mine = dir === 'from' ? o : d;
+    const other = dir === 'from' ? d : o;
+    if (!set.has(mine) || set.has(other)) continue;
+    const e = byOther.get(other) || { station: other, count: 0, first: DAY * 2, last: -1, shortest: Infinity, via: new Map() };
     e.count++;
     e.first = Math.min(e.first, dep);
     e.last = Math.max(e.last, dep);
     e.shortest = Math.min(e.shortest, arr - dep);
-    byDest.set(d, e);
+    e.via.set(mine, (e.via.get(mine) || 0) + 1);
+    byOther.set(other, e);
   }
-  return [...byDest.values()];
+  return [...byOther.values()].map((e) => ({ ...e, via: [...e.via].sort((a, b) => b[1] - a[1])[0][0] }));
 }
 
 const handlers = {
@@ -85,7 +89,7 @@ const handlers = {
     }
     return out;
   },
-  explore: (msg) => explore(msg.date, msg.origins),
+  explore: (msg) => explore(msg.date, msg.places, msg.dir),
 };
 
 self.onmessage = async (e) => {

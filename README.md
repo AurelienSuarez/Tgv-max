@@ -4,7 +4,7 @@ Trouve une place **MAX JEUNE / MAX SENIOR** sur les 30 prochains jours, même qu
 
 - **Trajets du jour** : tous les trajets intéressants d'une journée (aucun n'est à la fois plus tôt au départ, plus tard à l'arrivée et avec plus de billets qu'un autre).
 - **Calendrier** : le nombre de trajets possibles pour chacun des 30 prochains jours.
-- **Où aller ?** : toutes les destinations directes avec des places au départ d'une gare.
+- **Explorer** : sur une carte interactive, toutes les gares reliées en direct avec des places, au départ d'une gare ou à l'arrivée à une gare.
 
 ## Fonctionnement
 
@@ -30,4 +30,4 @@ Dans le repo GitHub : **Settings → Pages → Build and deployment → Source :
 
 ## Licences
 
-Code sous licence MIT. Données dérivées sous licence ODbL : © SNCF Voyageurs, dataset `tgvmax` sur ressources.data.sncf.com. Max Relais n'est pas affilié à la SNCF.
+Code sous licence MIT. Données dérivées sous licence ODbL : © SNCF Voyageurs, dataset `tgvmax` sur ressources.data.sncf.com. Coordonnées des gares : trainline-eu/stations (ODbL). Fond de carte : Natural Earth (domaine public). Max Relais n'est pas affilié à la SNCF.

@@ -9,8 +9,8 @@ const read = (p) => readFile(new URL(p, site), 'utf8');
 const strip = (src) => src.replace(/^import .*;$/gm, '').replace(/^export /gm, '');
 const out = process.argv[2] || 'dist/max-relais.html';
 
-const [stationsJs, csaJs, workerJs, appJs, css, html] = await Promise.all(
-  ['lib/stations.js', 'lib/csa.js', 'worker.js', 'app.js', 'style.css', 'index.html'].map(read),
+const [stationsJs, csaJs, geoJs, mapJs, workerJs, appJs, css, html] = await Promise.all(
+  ['lib/stations.js', 'lib/csa.js', 'lib/geo-data.js', 'map.js', 'worker.js', 'app.js', 'style.css', 'index.html'].map(read),
 );
 const meta = JSON.parse(await read('data/meta.json'));
 const stations = JSON.parse(await read('data/stations.json'));
@@ -35,6 +35,8 @@ ${body}
 <script>
 (() => {
 ${safe(lib)}
+${safe(strip(geoJs))}
+${safe(strip(mapJs))}
 ${safe(strip(appJs))}
 })();
 </script>
