@@ -107,6 +107,44 @@ async function explore(date, places, dir, q) {
   return out;
 }
 
+// Week-ends: destinations with a free outbound on Friday (after `friAfter`) or
+// Saturday and a free return on Sunday towards the origin.
+async function weekends(origins, q, friAfter = 15 * 60) {
+  const tr = transfers(q.minChange);
+  const opts = { origins, maxLegs: q.maxLegs, maxWait: q.maxWait, maxDuration: 24 * 60 };
+  const nowFrom = q.from || 0;
+  const today = q.today;
+  const out = [];
+  for (const sun of dates) {
+    if (new Date(`${sun}T12:00:00Z`).getUTCDay() !== 0) continue;
+    const i = dates.indexOf(sun);
+    const fri = dates[i - 2];
+    const sat = dates[i - 1];
+    const startFrom = (d, base) => Math.max(base, d === today ? nowFrom : 0);
+    const summarize = (list) => (list && list.length ? {
+      count: list.length,
+      first: Math.min(...list.map((o) => o.dep)),
+      last: Math.max(...list.map((o) => o.dep)),
+      direct: list.some((o) => o.legs === 1),
+      fresh: list.some((o) => o.isNew),
+    } : null);
+    const outFri = fri && fri >= today ? reachAll(await timetableFor(fri), tr, { ...opts, from: startFrom(fri, friAfter), to: DAY - 1 }) : new Map();
+    const outSat = sat && sat >= today ? reachAll(await timetableFor(sat), tr, { ...opts, from: startFrom(sat, 0), to: DAY - 1 }) : new Map();
+    const back = reachAll(await timetableFor(sun, true), tr, { ...opts, from: -3 * DAY, to: 0 });
+    const items = [];
+    for (const [station, list] of back) {
+      const ret = list.map((o) => ({ ...o, dep: -o.arr, arr: -o.dep })).filter((o) => o.dep >= startFrom(sun, 0) && o.dep < DAY);
+      const f = summarize(outFri.get(station));
+      const s = summarize(outSat.get(station));
+      const r = summarize(ret);
+      if (r && (f || s)) items.push({ station, fri: f, sat: s, ret: r, score: (f ? f.count : 0) + (s ? s.count : 0) + r.count });
+    }
+    items.sort((a, b) => b.score - a.score);
+    if (fri >= today || sat >= today) out.push({ fri: fri && fri >= today ? fri : null, sat: sat && sat >= today ? sat : null, sun, items });
+  }
+  return out;
+}
+
 const handlers = {
   init(msg) {
     stations = msg.stations;
@@ -131,6 +169,7 @@ const handlers = {
     return out;
   },
   explore: (msg) => explore(msg.date, msg.places, msg.dir, msg.query),
+  weekends: (msg) => weekends(msg.origins, msg.query, msg.friAfter),
 };
 
 self.onmessage = async (e) => {

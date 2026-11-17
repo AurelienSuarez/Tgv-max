@@ -69,6 +69,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   background: var(--paper);
@@ -100,7 +101,7 @@ button, input, select { font: inherit; color: inherit; }
   text-transform: uppercase;
 }
 .brand h1 span { color: var(--accent); }
-.freshness { margin: 0; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.freshness { margin: 0; font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; max-width: 46ch; }
 .pitch { margin: 0; max-width: 62ch; color: var(--muted); text-wrap: pretty; }
 
 /* Form */
@@ -488,6 +489,32 @@ body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-a
 .cal-cell:disabled { opacity: 0.35; cursor: not-allowed; }
 .freshness.stale { color: var(--amber); font-weight: 600; }
 .seg.small button { min-height: 36px; font-size: 0.85rem; }
+
+/* Sort and filters */
+.filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
+.mini { display: grid; gap: 4px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.mini select { min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 0.9rem; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--ink); }
+.check { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; font-size: 0.9rem; font-weight: 500; cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+/* Week-ends */
+.wk { display: grid; gap: 10px; }
+.wk + .wk { margin-top: 6px; }
+.wk-head {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+.wk.selected .wk-head { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.wk-title { font: 600 1.2rem/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.02em; }
+.wk-title::first-letter { text-transform: uppercase; }
+.wk-count { font-size: 0.85rem; color: var(--muted); }
+.wk .dest-list .info { line-height: 1.45; }
 
 /* Footer */
 .foot { border-top: 1px solid var(--line); padding-top: 16px; font-size: 0.85rem; color: var(--muted); display: grid; gap: 6px; }

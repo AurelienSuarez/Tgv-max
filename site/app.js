@@ -16,7 +16,10 @@ const state = {
   from: null, to: null, date: null, retDate: null, rt: false, tab: 'trajets',
   shown: { a: PAGE, r: PAGE }, onlyNew: false, calPick: 'a',
   exploreFilter: '', exploreDir: 'from', exploreLegs: 1, trip: 'a0',
+  sort: 'dep', after: 0, before: 0, noNight: false,
+  friAfter: 15 * 60, weekend: 0, weekendOpen: {},
 };
+let lastWeekends = [];
 let meta, stations, axes, places, dates, worker, map;
 let lastTrips = { a: [], r: [] };
 let reqId = 0;
@@ -265,6 +268,38 @@ async function searchSide(side) {
   return call('search', { date, query: q });
 }
 
+const isNight = (j) => j.legs.some((l) => axes[l.axe] === 'IC NUIT');
+
+function applyFilters(js) {
+  const out = js.filter((j) =>
+    (!state.after || j.dep >= state.after)
+    && (!state.before || j.arr <= state.before)
+    && (!state.noNight || !isNight(j))
+    && (!state.onlyNew || j.isNew));
+  const key = {
+    dep: (j) => j.dep,
+    arr: (j) => j.arr,
+    dur: (j) => j.arr - j.dep,
+    legs: (j) => j.legs.length * 1e5 + j.dep,
+  }[state.sort];
+  return out.sort((a, b) => key(a) - key(b) || a.dep - b.dep);
+}
+
+function filterBar(anyNew) {
+  const opt = (v, label, cur) => `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}>${label}</option>`;
+  const hours = [0, 6, 9, 12, 15, 17, 19].map((h) => opt(h * 60, h ? `après ${h}h` : 'à toute heure', state.after)).join('');
+  const arrive = [0, 12, 15, 18, 21, 24].map((h) => opt(h * 60, h ? (h === 24 ? 'avant minuit' : `avant ${h}h`) : 'à toute heure', state.before)).join('');
+  return `<div class="filters" role="group" aria-label="Trier et filtrer">
+    <label class="mini"><span>Trier par</span><select id="f-sort">
+      ${opt('dep', 'heure de départ', state.sort)}${opt('arr', "heure d'arrivée", state.sort)}${opt('dur', 'durée', state.sort)}${opt('legs', 'nombre de billets', state.sort)}
+    </select></label>
+    <label class="mini"><span>Partir</span><select id="f-after">${hours}</select></label>
+    <label class="mini"><span>Arriver</span><select id="f-before">${arrive}</select></label>
+    <label class="check"><input type="checkbox" id="f-nonight"${state.noNight ? ' checked' : ''}> Sans train de nuit</label>
+    ${anyNew || state.onlyNew ? `<button type="button" class="toggle" data-onlynew aria-pressed="${state.onlyNew}">Nouvelles places seulement</button>` : ''}
+  </div>`;
+}
+
 function sectionHtml(side, js) {
   const reverse = side === 'r';
   const a = reverse ? state.to : state.from;
@@ -272,7 +307,7 @@ function sectionHtml(side, js) {
   const date = reverse ? state.retDate : state.date;
   const day = fmtDate(date, DAY_LONG);
   const title = state.rt ? `<h2 class="leg-title"><span>${reverse ? 'Retour' : 'Aller'}</span> ${esc(day)}</h2>` : '';
-  const shownList = state.onlyNew ? js.filter((j) => j.isNew) : js;
+  const shownList = applyFilters(js);
   if (!js.length) {
     return `${title}<div class="empty"><strong>Aucune place gratuite ${esc(a.label)} → ${esc(b.label)} le ${esc(day)}.</strong>
       Essaie d'autoriser plus de billets ou une attente plus longue dans les réglages, ou regarde le calendrier.
@@ -280,11 +315,12 @@ function sectionHtml(side, js) {
   }
   const direct = js.filter((j) => j.legs.length === 1).length;
   const fresh = js.filter((j) => j.isNew).length;
-  const summary = `<p class="summary"><strong>${plural(js.length, 'trajet')}</strong> ${esc(a.label)} → ${esc(b.label)}${state.rt ? '' : ` le ${esc(day)}`} · ${direct} direct${direct > 1 ? 's' : ''}, ${js.length - direct} en plusieurs billets${fresh ? ` · <b class="new-txt">${plural(fresh, 'nouveau', 'nouveaux')}</b>` : ''}</p>`;
+  const filtered = shownList.length !== js.length ? ` · ${shownList.length} avec tes filtres` : '';
+  const summary = `<p class="summary"><strong>${plural(js.length, 'trajet')}</strong> ${esc(a.label)} → ${esc(b.label)}${state.rt ? '' : ` le ${esc(day)}`} · ${direct} direct${direct > 1 ? 's' : ''}, ${js.length - direct} en plusieurs billets${fresh ? ` · <b class="new-txt">${plural(fresh, 'nouveau', 'nouveaux')}</b>` : ''}${filtered}</p>`;
   const limit = state.shown[side];
   const cards = shownList.slice(0, limit).map((j) => journeyCard(j, `${side}${js.indexOf(j)}`)).join('');
   const more = shownList.length > limit ? `<button type="button" class="btn ghost more" data-more="${side}">Afficher ${Math.min(PAGE, shownList.length - limit)} trajets de plus</button>` : '';
-  const none = state.onlyNew && !shownList.length ? '<div class="empty">Pas de nouvelle place depuis hier sur ce trajet.</div>' : '';
+  const none = !shownList.length ? `<div class="empty">${state.onlyNew ? 'Pas de nouvelle place depuis hier avec ces filtres.' : 'Aucun trajet ne correspond aux filtres.'}</div>` : '';
   return `<section class="leg-block">${title}${summary}${cards}${none}${more}</section>`;
 }
 
@@ -306,10 +342,7 @@ async function showTrips() {
   if (!tripByKey(state.trip)) state.trip = a.length ? 'a0' : 'r0';
   drawTripMap();
   const anyNew = [...a, ...r].some((j) => j.isNew);
-  const toggle = anyNew || state.onlyNew
-    ? `<div class="toolbar"><button type="button" class="toggle" data-onlynew aria-pressed="${state.onlyNew}">Seulement les places apparues depuis hier</button></div>`
-    : '';
-  view.innerHTML = toggle + sectionHtml('a', a) + (state.rt ? sectionHtml('r', r) : '');
+  view.innerHTML = filterBar(anyNew) + sectionHtml('a', a) + (state.rt ? sectionHtml('r', r) : '');
 }
 showTrips.token = 0;
 
@@ -371,7 +404,7 @@ async function showExplore() {
     </div>
     <div class="seg small" role="radiogroup" aria-label="Correspondances">
       <button type="button" role="radio" data-legs="1" aria-checked="${legs === 1}">Trains directs</button>
-      <button type="button" role="radio" data-legs="2" aria-checked="${legs === 2}">Avec une correspondance</button>
+      <button type="button" role="radio" data-legs="2" aria-checked="${legs === 2}">Avec correspondance</button>
     </div>`;
   if (needPlaces('depart')) { $('#view').insertAdjacentHTML('afterbegin', seg); return; }
   const place = dir === 'from' ? state.from : state.to;
@@ -411,12 +444,103 @@ async function showExplore() {
       <button type="button" class="btn ghost" data-pick="${r.station}">Trajets</button></li>`).join('')}</ul>`;
 }
 
+function shortDay(d) {
+  return fmtDate(d, { weekday: 'short', day: 'numeric' }).replace('.', '');
+}
+
+function drawWeekendMap() {
+  const w = lastWeekends[state.weekend];
+  if (!w) { map.draw({ items: [], legs: [], focus: state.from.ids }); return; }
+  const via = state.from.ids[0];
+  map.draw({
+    focus: state.from.ids,
+    focusLabel: state.from.city ? state.from.label : null,
+    items: w.items.map((it) => ({ station: it.station, weight: it.score, info: weekendInfo(w, it, ' · '), trips: true })),
+    legs: w.items.map((it) => [via, it.station, 'from']),
+  });
+}
+
+function weekendInfo(w, it, sep = '<br>') {
+  const outs = [];
+  if (it.fri) outs.push(`${shortDay(w.fri)} dès ${fmtTime(it.fri.first)} (${it.fri.count})`);
+  if (it.sat) outs.push(`${shortDay(w.sat)} dès ${fmtTime(it.sat.first)} (${it.sat.count})`);
+  return `Aller : ${outs.join(', ')}${sep}Retour : ${shortDay(w.sun)} jusqu'à ${fmtTime(it.ret.last)} (${it.ret.count})`;
+}
+
+async function showWeekends() {
+  const legs = state.exploreLegs;
+  const opt = (v, label) => `<option value="${v}"${v === state.friAfter ? ' selected' : ''}>${label}</option>`;
+  const controls = `<div class="seg small" role="radiogroup" aria-label="Correspondances">
+      <button type="button" role="radio" data-legs="1" aria-checked="${legs === 1}">Trains directs</button>
+      <button type="button" role="radio" data-legs="2" aria-checked="${legs === 2}">Avec correspondance</button>
+    </div>
+    <div class="filters"><label class="mini"><span>Le vendredi, partir</span><select id="f-friafter">
+      ${opt(12 * 60, 'après 12h')}${opt(15 * 60, 'après 15h')}${opt(17 * 60, 'après 17h')}${opt(19 * 60, 'après 19h')}
+    </select></label></div>`;
+  if (!state.from) {
+    $('#view').innerHTML = '<div class="empty"><strong>Choisis une gare de départ</strong>Les week-ends sont calculés au départ de cette gare.</div>';
+    return;
+  }
+  const view = $('#view');
+  view.innerHTML = controls + '<p class="loading">Recherche des week-ends possibles…</p>';
+  const token = ++showTrips.token;
+  const q = { ...query(), maxLegs: legs, today: todayParis(), from: nowMinutesParis() };
+  lastWeekends = await call('weekends', { origins: state.from.ids, query: q, friAfter: state.friAfter });
+  if (token !== showTrips.token) return;
+  if (state.weekend >= lastWeekends.length) state.weekend = 0;
+  drawWeekendMap();
+  if (!lastWeekends.length) {
+    view.innerHTML = controls + '<div class="empty"><strong>Aucun week-end dans les 30 prochains jours.</strong></div>';
+    return;
+  }
+  const blocks = lastWeekends.map((w, wi) => {
+    const start = w.fri || w.sat;
+    const title = `Week-end du ${fmtDate(start, { weekday: 'long', day: 'numeric' })} au ${fmtDate(w.sun, { weekday: 'long', day: 'numeric', month: 'long' })}`;
+    const open = state.weekendOpen[w.sun];
+    const list = open ? w.items : w.items.slice(0, 8);
+    const items = list.map((it) => `<li><span class="name">${esc(stationName(it.station))}${(it.fri && it.fri.fresh) || (it.sat && it.sat.fresh) || it.ret.fresh ? ' <span class="chip new">Nouveau</span>' : ''}</span>
+        <span class="info">${weekendInfo(w, it)}</span>
+        <button type="button" class="btn ghost" data-wk="${wi}" data-st="${it.station}">Voir</button></li>`).join('');
+    const more = w.items.length > 8 && !open ? `<button type="button" class="btn ghost more" data-wkopen="${w.sun}">Voir les ${w.items.length} destinations</button>` : '';
+    return `<section class="wk${wi === state.weekend ? ' selected' : ''}">
+      <button type="button" class="wk-head" data-wksel="${wi}" aria-pressed="${wi === state.weekend}">
+        <span class="wk-title">${esc(title)}</span>
+        <span class="wk-count">${w.items.length ? plural(w.items.length, 'destination') : 'aucune destination'} aller + retour gratuits</span>
+      </button>
+      ${w.items.length ? `<ul class="dest-list">${items}</ul>${more}` : '<p class="summary">Pas de combinaison aller + retour gratuite ce week-end.</p>'}
+    </section>`;
+  }).join('');
+  view.innerHTML = controls + `<p class="summary">Destinations où tu peux partir <strong>gratuitement</strong> le vendredi ou le samedi <strong>et</strong> revenir gratuitement le dimanche, au départ de ${esc(state.from.label)}. Touche un week-end pour le voir sur la carte.</p>` + blocks;
+}
+
+function openWeekendTrip(wi, station) {
+  const w = lastWeekends[wi];
+  const it = w.items.find((x) => x.station === station);
+  const p = placeOf(station);
+  if (!p) return;
+  state.to = p;
+  $('#to').value = p.label;
+  state.rt = true;
+  const out = it.fri ? w.fri : w.sat;
+  setDate(out);
+  setRetDate(w.sun);
+  if (it.fri && out === w.fri) state.after = state.friAfter;
+  $('#maxLegs').value = String(Math.max(Number($('#maxLegs').value), state.exploreLegs));
+  setTab('trajets');
+  refresh();
+  window.scrollTo({ top: $('.tabs').offsetTop - 8 });
+}
+
 function mapAction(act, i) {
   const p = placeOf(i);
   if (!p) return;
   if (act === 'from') { state.from = p; $('#from').value = p.label; }
   else if (act === 'to') { state.to = p; $('#to').value = p.label; }
   else if (act === 'trips') {
+    if (state.tab === 'weekends') {
+      const w = lastWeekends[state.weekend];
+      if (w && w.items.some((x) => x.station === i)) { openWeekendTrip(state.weekend, i); return; }
+    }
     if (state.tab === 'depart' && state.exploreDir === 'to') { state.from = p; $('#from').value = p.label; }
     else { state.to = p; $('#to').value = p.label; }
     if (state.tab === 'depart') {
@@ -442,6 +566,7 @@ function refresh() {
   $('#map').hidden = state.tab === 'calendrier';
   if (state.tab === 'calendrier') return showCalendar();
   if (state.tab === 'depart') return showExplore();
+  if (state.tab === 'weekends') return showWeekends();
   return showTrips();
 }
 
@@ -450,6 +575,7 @@ function persist() {
     from: state.from?.key, to: state.to?.key, date: state.date, retDate: state.retDate, rt: state.rt,
     maxLegs: $('#maxLegs').value, minChange: $('#minChange').value, maxWait: $('#maxWait').value,
     tab: state.tab, dir: state.exploreDir, legs: state.exploreLegs,
+    sort: state.sort, after: state.after, before: state.before, noNight: state.noNight, friAfter: state.friAfter,
   };
   store.set('last', s);
   if (!EMB) {
@@ -478,9 +604,12 @@ function restore() {
   state.rt = !!ret;
   if (ret && dates.includes(ret) && ret >= state.date) state.retDate = ret;
   const tab = params.get('vue') || saved.tab;
-  if (['trajets', 'calendrier', 'depart'].includes(tab)) state.tab = tab;
+  if (['trajets', 'calendrier', 'depart', 'weekends'].includes(tab)) state.tab = tab;
   if (saved.dir === 'to') state.exploreDir = 'to';
   if (saved.legs === 2) state.exploreLegs = 2;
+  if (['dep', 'arr', 'dur', 'legs'].includes(saved.sort)) state.sort = saved.sort;
+  for (const k of ['after', 'before', 'friAfter']) if (Number.isFinite(saved[k])) state[k] = saved[k];
+  state.noNight = !!saved.noNight;
   for (const k of ['maxLegs', 'minChange', 'maxWait']) {
     if (saved[k] && [...$(`#${k}`).options].some((o) => o.value === saved[k])) $(`#${k}`).value = saved[k];
   }
@@ -502,7 +631,7 @@ function renderFreshness() {
   const when = new Date(updated).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   const ageHours = (Date.now() - new Date(meta.generatedAt).getTime()) / 36e5;
   const el = $('#freshness');
-  let text = `Places SNCF du ${when}`;
+  let text = `La SNCF met les places à jour une fois par jour, vers 6h20. Dernière mise à jour : ${when}`;
   if (meta.newSince && meta.newSeats) text += ` · ${meta.newSeats} nouvelles depuis hier`;
   if (EMB) text += ' (instantané)';
   el.textContent = text;
@@ -600,12 +729,36 @@ async function main() {
     if (dirBtn) { state.exploreDir = dirBtn.dataset.dir; state.exploreFilter = ''; refresh(); return; }
     const legsBtn = t.closest('[data-legs]');
     if (legsBtn) { state.exploreLegs = Number(legsBtn.dataset.legs); refresh(); return; }
+    const wk = t.closest('[data-wk]');
+    if (wk) { openWeekendTrip(Number(wk.dataset.wk), Number(wk.dataset.st)); return; }
+    const wkSel = t.closest('[data-wksel]');
+    if (wkSel) {
+      state.weekend = Number(wkSel.dataset.wksel);
+      document.querySelectorAll('.wk').forEach((el, i) => el.classList.toggle('selected', i === state.weekend));
+      document.querySelectorAll('[data-wksel]').forEach((el, i) => el.setAttribute('aria-pressed', String(i === state.weekend)));
+      drawWeekendMap();
+      $('#map').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const wkOpen = t.closest('[data-wkopen]');
+    if (wkOpen) { state.weekendOpen[wkOpen.dataset.wkopen] = true; showWeekends(); return; }
     const card = t.closest('.trip[data-j]');
     if (card) selectTrip(card.dataset.j);
   });
   $('#view').addEventListener('keydown', (e) => {
     const card = e.target.closest && e.target.closest('.trip[data-j]');
     if (card && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectTrip(card.dataset.j); }
+  });
+  $('#view').addEventListener('change', (e) => {
+    const id = e.target.id;
+    if (id === 'f-sort') state.sort = e.target.value;
+    else if (id === 'f-after') state.after = Number(e.target.value);
+    else if (id === 'f-before') state.before = Number(e.target.value);
+    else if (id === 'f-nonight') state.noNight = e.target.checked;
+    else if (id === 'f-friafter') { state.friAfter = Number(e.target.value); persist(); showWeekends(); return; }
+    else return;
+    persist();
+    showTrips();
   });
   $('#view').addEventListener('input', (e) => {
     if (e.target.id !== 'explore-filter') return;

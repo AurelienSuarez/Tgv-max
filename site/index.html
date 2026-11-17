@@ -89,8 +89,9 @@
   </form>
 
   <nav class="tabs" role="tablist" aria-label="Vues">
-    <button type="button" role="tab" id="tab-trajets" aria-selected="true" data-tab="trajets">Trajets du jour</button>
+    <button type="button" role="tab" id="tab-trajets" aria-selected="true" data-tab="trajets">Trajets</button>
     <button type="button" role="tab" id="tab-calendrier" aria-selected="false" data-tab="calendrier">Calendrier</button>
+    <button type="button" role="tab" id="tab-weekends" aria-selected="false" data-tab="weekends">Week-ends</button>
     <button type="button" role="tab" id="tab-depart" aria-selected="false" data-tab="depart">Explorer</button>
   </nav>
 
@@ -99,7 +100,7 @@
   <main id="view" aria-live="polite"></main>
 
   <footer class="foot">
-    <p>Chaque segment est <strong>un billet à réserver séparément</strong> sur SNCF Connect. Les places partent vite et les données sont mises à jour une fois par jour : vérifie la disponibilité au moment de réserver.</p>
+    <p>Chaque segment est <strong>un billet à réserver séparément</strong> sur SNCF Connect. Les places partent vite et les données SNCF ne sont mises à jour qu'une fois par jour (vers 6h20) : vérifie la disponibilité au moment de réserver.</p>
     <p><a href="https://www.sncf-connect.com/" target="_blank" rel="noopener">Réserver sur SNCF Connect</a><span class="sep">·</span><span id="share-slot"></span></p>
     <p class="legal">Données © SNCF Voyageurs, licence <a href="https://opendatacommons.org/licenses/odbl/" target="_blank" rel="noopener">ODbL</a>, dataset <a href="https://ressources.data.sncf.com/explore/dataset/tgvmax/" target="_blank" rel="noopener">tgvmax</a>. Max Relais n'est pas affilié à la SNCF. Les autocars sont exclus.</p>
   </footer>
