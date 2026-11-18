@@ -153,7 +153,7 @@ function dateChips(list, selected) {
 function renderOpened() {
   const d = openedDate();
   const box = $('#opened');
-  if (!d || !meta.seatsByDate || !dates.includes(d)) return;
+  if (!d || !meta.seatsByDate || !dates.includes(d) || isStale()) return; // an old 'new day' would be wrong
   const counts = meta.dates.filter((x) => x !== d && dates.includes(x)).map((x) => meta.seatsByDate[x] || 0).sort((a, b) => a - b);
   const median = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
   const n = meta.seatsByDate[d] || 0;
@@ -649,20 +649,28 @@ async function loadJSON(path) {
   return r.json();
 }
 
+// Data is late when it comes from an earlier day than today (Paris time) after
+// 7:00, when today's SNCF update (around 6:20) should already be online.
+function isStale() {
+  const dataDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date(meta.sourceModified || meta.generatedAt));
+  const today = todayParis();
+  if (dataDay >= today) return false;
+  return nowMinutesParis() >= 7 * 60 || dataDay < addDays(today, -1);
+}
+
 function renderFreshness() {
   const updated = meta.sourceModified || meta.generatedAt;
   const when = new Date(updated).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-  const ageHours = (Date.now() - new Date(meta.generatedAt).getTime()) / 36e5;
   const el = $('#freshness');
   let text = `La SNCF met les places à jour une fois par jour, vers 6h20. Dernière mise à jour : ${when}`;
   if (meta.newSince && meta.newSeats) text += ` · ${meta.newSeats} nouvelles depuis hier`;
   if (EMB) text += ' (instantané)';
   el.textContent = text;
-  if (ageHours > 36) {
+  if (isStale()) {
     el.classList.add('stale');
     el.textContent += EMB
       ? ". Cette copie n'est plus à jour : des places ont pu partir ou se libérer."
-      : ". Les données n'ont pas été mises à jour depuis plus d'un jour : vérifie sur SNCF Connect.";
+      : ". Les places d'aujourd'hui ne sont pas encore arrivées sur le site : celles affichées sont celles d'avant. Réessaie un peu plus tard, et vérifie sur SNCF Connect.";
   }
 }
 

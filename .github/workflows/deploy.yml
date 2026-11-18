@@ -4,9 +4,18 @@ on:
   push:
     branches: [main, claude/sncf-train-routing-brief-5q8yfc]
   schedule:
-    # SNCF publishes the dataset around 05:20 UTC; second run as a safety net.
-    - cron: '41 5 * * *'
-    - cron: '41 11 * * *'
+    # SNCF publishes around 05:23 UTC (6:23 in Paris in winter). GitHub delays or
+    # drops scheduled runs, so try several times: each run checks first and only
+    # rebuilds when SNCF published a version the live site does not have.
+    - cron: '31 5 * * *'
+    - cron: '47 5 * * *'
+    - cron: '13 6 * * *'
+    - cron: '43 6 * * *'
+    - cron: '23 7 * * *'
+    - cron: '17 8 * * *'
+    - cron: '37 10 * * *'
+    - cron: '7 14 * * *'
+    - cron: '53 18 * * *'
   workflow_dispatch:
 
 permissions:
@@ -21,27 +30,38 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Is there a new SNCF version?
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then node scripts/check-update.js; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
       - name: Tests
+        if: steps.check.outputs.changed == 'true'
         run: npm test
       - name: Restore yesterday's seats
+        if: steps.check.outputs.changed == 'true'
         uses: actions/cache@v4
         with:
           path: .state
           key: tgvmax-state-${{ github.run_id }}
           restore-keys: tgvmax-state-
       - name: Download and split the tgvmax dataset
+        if: steps.check.outputs.changed == 'true'
         run: node scripts/build-data.js --out site/data --state .state
       - uses: actions/upload-pages-artifact@v3
+        if: steps.check.outputs.changed == 'true'
         with:
           path: site
 
   deploy:
     needs: build
+    if: needs.build.outputs.changed == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

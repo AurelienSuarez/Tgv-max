@@ -11,7 +11,7 @@ Observé le **2026-11-17** sur l'API en direct. Tout ce qui suit a été mesuré
 | Portail | `https://ressources.data.sncf.com` (Opendatasoft, Explore API v2.1) |
 | Licence | **ODbL**, https://data.sncf.com/pages/cgu/A1#A1 |
 | Dernière MAJ | `modified` = `data_processed` = 2026-11-17T05:23:12Z |
-| Fréquence | Non déclarée dans les métadonnées (`accrualperiodicity` = null). Une seule observation à ce jour : 05:23 UTC, soit 6h23 à Paris ; le site l'annonce comme « vers 6h20 » et affiche l'heure réelle de la dernière mise à jour. L'horodatage vers 05h20 UTC laisse penser à une **mise à jour quotidienne** dans la nuit. Le cron doit enregistrer `metas.default.modified` à chaque exécution pour le confirmer. |
+| Fréquence | Non déclarée dans les métadonnées (`accrualperiodicity` = null). Observé deux jours de suite : 05:23:12 UTC le 17/11 et 05:23:13 UTC le 18/11, soit 6h23 à Paris ; le site l'annonce comme « vers 6h20 » et affiche l'heure réelle de la dernière mise à jour. L'horodatage vers 05h20 UTC laisse penser à une **mise à jour quotidienne** dans la nuit. Le cron doit enregistrer `metas.default.modified` à chaque exécution pour le confirmer. |
 
 ### Endpoints
 
