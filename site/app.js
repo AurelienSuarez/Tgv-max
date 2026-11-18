@@ -161,7 +161,7 @@ function renderOpened() {
   const few = median && n < median * 0.2;
   box.innerHTML = `<span class="opened-tag">Nouveau jour</span>
     <span>Le <strong>${esc(day)}</strong> vient d'ouvrir à la réservation. ${few
-      ? `Pour l'instant, il n'a que ${n} place${n > 1 ? 's' : ''} gratuite${n > 1 ? 's' : ''} (environ ${median.toLocaleString('fr-FR')} les autres jours) : ses places arrivent sans doute plus tard. Reviens voir après la prochaine mise à jour.`
+      ? `Pour l'instant, il n'a que ${n} place${n > 1 ? 's' : ''} gratuite${n > 1 ? 's' : ''} (environ ${median.toLocaleString('fr-FR')} les autres jours) : ses places gratuites arrivent en général le lendemain matin. Reviens voir après la prochaine mise à jour.`
       : `Il a déjà ${n.toLocaleString('fr-FR')} places gratuites : c'est le moment d'en profiter.`}</span>
     <button type="button" class="linkish" id="opened-go">Voir ce jour</button>`;
   box.hidden = false;

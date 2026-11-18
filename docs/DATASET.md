@@ -72,7 +72,7 @@ GET .../datasets/tgvmax/exports/csv?delimiter=%3B
 
 ## Le jour qui vient d'ouvrir (J+30)
 
-Observé le 2026-11-17 à 6h23 : le dernier jour de la fenêtre (2026-12-17) n'avait que **26 places OUI** pour 11 024 lignes, contre 2 348 la veille et 1 000 à 6 000 les autres jours. Les places MAX du jour qui vient d'ouvrir ne sont donc pas encore toutes en ligne au moment de la mise à jour. Une seule observation : à confirmer sur plusieurs jours (`meta.seatsByDate` l'enregistre à chaque exécution). Le site l'annonce prudemment (« sans doute »).
+Observé le 2026-11-17 à 6h23 : le dernier jour de la fenêtre (2026-12-17) n'avait que **26 places OUI** pour 11 024 lignes, contre 2 348 la veille et 1 000 à 6 000 les autres jours. Les places MAX du jour qui vient d'ouvrir ne sont donc pas encore toutes en ligne au moment de la mise à jour. Confirmé le lendemain : le 2026-12-17 est passé de 26 à **1 475** places OUI entre les mises à jour du 17/11 et du 18/11, et le nouveau dernier jour (2026-12-18) n'en avait que 19. Les places du jour J+30 arrivent donc le lendemain de son ouverture ; elles apparaissent alors comme « nouvelles ». `meta.seatsByDate` continue de l'enregistrer.
 
 ## Échantillon de test
 
